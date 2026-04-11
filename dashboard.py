@@ -7,14 +7,14 @@ st.set_page_config(layout="wide")
 st.title("📊 TRADING SYSTEM DASHBOARD (REALTIME)")
 
 # ===== LOAD DATA FROM GITHUB =====
-url = "https://raw.githubusercontent.com/YOUR_USERNAME/stock-scanner/main/trades_log.csv"
+url = "https://raw.githubusercontent.com/anhvucrypto-oss/stock-scanner/refs/heads/main/trades_log.csv"
 
 try:
     df = pd.read_csv(url)
-except:
-    st.error("❌ Không load được dữ liệu từ GitHub")
+    st.success("✅ Load dữ liệu OK")
+except Exception as e:
+    st.error(f"❌ Lỗi load: {e}")
     st.stop()
-
 # ===== CHECK DATA =====
 df = df[df["result"].notna()]
 
