@@ -39,36 +39,54 @@ def send(msg):
 
 # ===== PUSH GITHUB =====
 def push_to_github():
+
+    import os
+
+    token = os.getenv("GITHUB_TOKEN")
+
+    if not token:
+        print("❌ Không tìm thấy GITHUB_TOKEN")
+        return
+
     try:
-        with open("trades_log.csv", "r") as f:
+        with open("trades_log.csv", "r", encoding="utf-8") as f:
             content = f.read()
 
+        import base64
         encoded = base64.b64encode(content.encode()).decode()
 
         url = f"https://api.github.com/repos/{REPO}/contents/{FILE_PATH}"
 
-        res = requests.get(url, headers={
-            "Authorization": f"token {GITHUB_TOKEN}"
-        })
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json"
+        }
 
-        sha = None
+        # lấy SHA
+        res = requests.get(url, headers=headers)
+
         if res.status_code == 200:
             sha = res.json()["sha"]
+        else:
+            sha = None
 
         data = {
             "message": "update trades log",
             "content": encoded,
-            "sha": sha
         }
 
-        requests.put(url, json=data, headers={
-            "Authorization": f"token {GITHUB_TOKEN}"
-        })
+        if sha:
+            data["sha"] = sha
 
-        print("✅ pushed GitHub")
-    except:
-        print("❌ push lỗi")
+        res = requests.put(url, json=data, headers=headers)
 
+        if res.status_code in [200, 201]:
+            print("✅ pushed GitHub OK")
+        else:
+            print("❌ push thất bại:", res.text)
+
+    except Exception as e:
+        print("❌ lỗi push:", e)
 # ===== DATA =====
 def get_data(symbol):
     try:
