@@ -6,53 +6,90 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
-st.title("📊 DASHBOARD DEBUG")
+st.title("📊 TRADING DASHBOARD (REALTIME)")
 
+# ===== LOAD DATA =====
 url = "https://raw.githubusercontent.com/anhvucrypto-oss/stock-scanner/main/trades_log.csv"
 
-# ===== DEBUG STEP 1 =====
-st.write("🔗 URL:", url)
+st.write("🔗 Loading data...")
 
 try:
     res = requests.get(url)
-    
-    st.write("📡 Status code:", res.status_code)
 
     if res.status_code != 200:
-        st.error("❌ GitHub không trả dữ liệu")
+        st.error(f"❌ Không load được GitHub: {res.status_code}")
         st.stop()
 
-    st.write("📄 Raw content:")
-    st.code(res.text)
-
-    # ===== LOAD CSV =====
     csv_data = StringIO(res.text)
     df = pd.read_csv(csv_data)
 
 except Exception as e:
-    st.error(f"❌ Lỗi request: {e}")
+    st.error(f"❌ Lỗi load: {e}")
     st.stop()
 
-# ===== DEBUG STEP 2 =====
-st.write("📊 DataFrame:")
-st.dataframe(df)
+# ===== CHECK DATA =====
+if df.empty:
+    st.warning("⚠️ File rỗng")
+    st.stop()
 
 # ===== CLEAN =====
 df["result"] = pd.to_numeric(df["result"], errors="coerce")
-df = df.dropna()
+
+df_all = df.copy()
+df = df.dropna(subset=["result"])
 
 if len(df) == 0:
-    st.warning("⚠️ Không có dữ liệu hợp lệ")
+    st.warning("⚠️ Chưa có lệnh hoàn thành")
+    st.dataframe(df_all.tail(10))
     st.stop()
 
 # ===== EQUITY =====
 df["equity"] = df["result"].cumsum()
 
-# ===== CHART =====
-st.subheader("Equity")
+# ===== NAV =====
+INITIAL_CAPITAL = 100000000
+df["nav"] = INITIAL_CAPITAL * (1 + df["equity"] * 0.01)
 
-fig, ax = plt.subplots()
-ax.plot(df["equity"])
-ax.grid()
+# ===== DRAWDOWN =====
+df["peak"] = df["equity"].cummax()
+df["drawdown"] = df["equity"] - df["peak"]
 
-st.pyplot(fig)
+# ===== STATS =====
+total = len(df)
+win = len(df[df["result"] > 0])
+winrate = round(win / total * 100, 2)
+pnl = df["result"].sum()
+max_dd = df["drawdown"].min()
+
+# ===== UI =====
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("Trades", total)
+col2.metric("Winrate", f"{winrate}%")
+col3.metric("PnL (R)", round(pnl,2))
+col4.metric("Max DD", round(max_dd,2))
+
+# ===== EQUITY =====
+st.subheader("📈 Equity Curve")
+fig1, ax1 = plt.subplots()
+ax1.plot(df["equity"])
+ax1.grid()
+st.pyplot(fig1)
+
+# ===== NAV =====
+st.subheader("💰 NAV")
+fig2, ax2 = plt.subplots()
+ax2.plot(df["nav"])
+ax2.grid()
+st.pyplot(fig2)
+
+# ===== DD =====
+st.subheader("📉 Drawdown")
+fig3, ax3 = plt.subplots()
+ax3.plot(df["drawdown"])
+ax3.grid()
+st.pyplot(fig3)
+
+# ===== TABLE =====
+st.subheader("📋 Trades")
+st.dataframe(df.tail(20))
