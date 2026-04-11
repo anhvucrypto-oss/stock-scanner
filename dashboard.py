@@ -1,98 +1,58 @@
 import streamlit as st
 import pandas as pd
+import requests
+from io import StringIO
 import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
-st.title("📊 TRADING SYSTEM DASHBOARD (REALTIME)")
-
-# ===== LOAD DATA FROM GITHUB =====
-import requests
-from io import StringIO
+st.title("📊 DASHBOARD DEBUG")
 
 url = "https://raw.githubusercontent.com/anhvucrypto-oss/stock-scanner/main/trades_log.csv"
+
+# ===== DEBUG STEP 1 =====
+st.write("🔗 URL:", url)
 
 try:
     res = requests.get(url)
     
+    st.write("📡 Status code:", res.status_code)
+
     if res.status_code != 200:
-        st.error(f"❌ HTTP lỗi: {res.status_code}")
+        st.error("❌ GitHub không trả dữ liệu")
         st.stop()
 
+    st.write("📄 Raw content:")
+    st.code(res.text)
+
+    # ===== LOAD CSV =====
     csv_data = StringIO(res.text)
     df = pd.read_csv(csv_data)
 
-    st.success("✅ Load GitHub OK")
-
 except Exception as e:
-    st.error(f"❌ Lỗi load: {e}")
+    st.error(f"❌ Lỗi request: {e}")
+    st.stop()
+
+# ===== DEBUG STEP 2 =====
+st.write("📊 DataFrame:")
+st.dataframe(df)
+
+# ===== CLEAN =====
+df["result"] = pd.to_numeric(df["result"], errors="coerce")
+df = df.dropna()
+
+if len(df) == 0:
+    st.warning("⚠️ Không có dữ liệu hợp lệ")
     st.stop()
 
 # ===== EQUITY =====
-equity = [0]
-for r in df["result"]:
-    equity.append(equity[-1] + r)
+df["equity"] = df["result"].cumsum()
 
-df["equity"] = equity[1:]
+# ===== CHART =====
+st.subheader("Equity")
 
-# ===== NAV =====
-INITIAL_CAPITAL = 100000000
-df["nav"] = INITIAL_CAPITAL * (1 + df["equity"] * 0.01)
+fig, ax = plt.subplots()
+ax.plot(df["equity"])
+ax.grid()
 
-# ===== DRAWDOWN =====
-df["peak"] = df["equity"].cummax()
-df["drawdown"] = df["equity"] - df["peak"]
-max_dd = df["drawdown"].min()
-
-# ===== STATS =====
-total = len(df)
-win = len(df[df["result"] > 0])
-winrate = round(win / total * 100, 2)
-pnl = df["result"].sum()
-
-# ===== UI =====
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Trades", total)
-col2.metric("Winrate", f"{winrate}%")
-col3.metric("PnL (R)", round(pnl, 2))
-col4.metric("Max DD", round(max_dd, 2))
-
-# ===== EQUITY CHART =====
-st.subheader("📈 Equity Curve")
-
-fig1, ax1 = plt.subplots()
-ax1.plot(df["equity"])
-ax1.set_title("Equity Growth")
-ax1.grid()
-
-st.pyplot(fig1)
-
-# ===== NAV CHART =====
-st.subheader("💰 NAV (Account Growth)")
-
-fig2, ax2 = plt.subplots()
-ax2.plot(df["nav"])
-ax2.set_title("NAV")
-ax2.grid()
-
-st.pyplot(fig2)
-
-# ===== DRAWDOWN CHART =====
-st.subheader("📉 Drawdown")
-
-fig3, ax3 = plt.subplots()
-ax3.plot(df["drawdown"])
-ax3.set_title("Drawdown")
-ax3.grid()
-
-st.pyplot(fig3)
-
-# ===== TABLE =====
-st.subheader("📋 Trades Log")
-
-st.dataframe(df.tail(20))
-
-# ===== AUTO REFRESH =====
-st.caption("🔄 Auto refresh mỗi 60s")
-st.experimental_rerun()
+st.pyplot(fig)
