@@ -1,1 +1,0 @@
-worker: python auto_trade_final.py
