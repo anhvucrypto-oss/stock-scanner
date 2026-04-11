@@ -7,24 +7,26 @@ st.set_page_config(layout="wide")
 st.title("📊 TRADING SYSTEM DASHBOARD (REALTIME)")
 
 # ===== LOAD DATA FROM GITHUB =====
-url = "https://raw.githubusercontent.com/anhvucrypto-oss/stock-scanner/refs/heads/main/trades_log.csv"
+import requests
+from io import StringIO
+
+url = "https://raw.githubusercontent.com/anhvucrypto-oss/stock-scanner/main/trades_log.csv"
 
 try:
-    df = pd.read_csv(url)
-    st.success("✅ Load dữ liệu OK")
+    res = requests.get(url)
+    
+    if res.status_code != 200:
+        st.error(f"❌ HTTP lỗi: {res.status_code}")
+        st.stop()
+
+    csv_data = StringIO(res.text)
+    df = pd.read_csv(csv_data)
+
+    st.success("✅ Load GitHub OK")
+
 except Exception as e:
     st.error(f"❌ Lỗi load: {e}")
     st.stop()
-# ===== CHECK DATA =====
-df = df[df["result"].notna()]
-
-if len(df) == 0:
-    st.warning("⚠️ Chưa có dữ liệu trade")
-    st.stop()
-
-# ===== CONVERT =====
-df["result"] = pd.to_numeric(df["result"], errors="coerce")
-df = df.dropna()
 
 # ===== EQUITY =====
 equity = [0]
