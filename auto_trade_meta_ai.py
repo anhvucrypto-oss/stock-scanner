@@ -1,13 +1,11 @@
 import requests
 import pandas as pd
-import numpy as np
-from ta.momentum import RSIIndicator
-from datetime import datetime
-import time
 import os
+import time
 import base64
+from datetime import datetime
 
-print("🚀 META AI SYSTEM START")
+print("🚀 META AI FINAL START")
 
 # ===== CONFIG =====
 TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
@@ -19,51 +17,57 @@ FILE_PATH = "trades_log.csv"
 LOG = "trades_log.csv"
 MEMORY = "meta_memory.csv"
 
-# ===== MEMORY FILE =====
-MEMORY_FILE = "meta_memory.csv"
+# ===== INIT FILE =====
+if not os.path.exists(LOG):
+    pd.DataFrame(columns=["time","symbol","entry","sl","tp","result","strategy","regime"]).to_csv(LOG,index=False)
 
-# ===== INIT MEMORY =====
-if not os.path.exists(MEMORY_FILE):
-    df_mem = pd.DataFrame(columns=["regime","strategy","result"])
-    df_mem.to_csv(MEMORY_FILE, index=False)
-
-# ===== LOAD SYMBOL =====
-symbols = pd.read_csv("symbols.csv")["symbol"].dropna().tolist()
+if not os.path.exists(MEMORY):
+    pd.DataFrame(columns=["regime","strategy","result"]).to_csv(MEMORY,index=False)
 
 # ===== TELEGRAM =====
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
-    except:
-        pass
+        res = requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+        print("📨 Telegram:", res.status_code)
+    except Exception as e:
+        print("❌ Telegram lỗi:", e)
 
-# ===== PUSH =====
+# ===== PUSH GITHUB =====
 def push():
+
     token = os.getenv("GITHUB_TOKEN")
+
     if not token:
+        print("❌ Không có GITHUB_TOKEN")
         return
 
-    with open("trades_log.csv","r",encoding="utf-8") as f:
-        content = f.read()
+    try:
+        with open(LOG,"r",encoding="utf-8") as f:
+            content = f.read()
 
-    encoded = base64.b64encode(content.encode()).decode()
+        encoded = base64.b64encode(content.encode()).decode()
 
-    url = f"https://api.github.com/repos/{REPO}/contents/{FILE_PATH}"
+        url = f"https://api.github.com/repos/{REPO}/contents/{FILE_PATH}"
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json"
-    }
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json"
+        }
 
-    res = requests.get(url, headers=headers)
-    sha = res.json()["sha"] if res.status_code == 200 else None
+        res = requests.get(url, headers=headers)
+        sha = res.json()["sha"] if res.status_code == 200 else None
 
-    data = {"message":"update","content":encoded}
-    if sha:
-        data["sha"] = sha
+        data = {"message":"update","content":encoded}
+        if sha:
+            data["sha"] = sha
 
-    requests.put(url, json=data, headers=headers)
+        res = requests.put(url, json=data, headers=headers)
+
+        print("📡 GitHub:", res.status_code)
+
+    except Exception as e:
+        print("❌ push lỗi:", e)
 
 # ===== DATA =====
 def get_data(symbol):
@@ -82,19 +86,19 @@ def get_data(symbol):
     except:
         return None
 
-# ===== MARKET REGIME =====
+# ===== MARKET =====
 def detect_market():
 
     df = get_data("VNINDEX")
     if df is None:
         return "unknown"
 
-    df["ma20"] = df["close"].rolling(20).mean()
-    df["ma50"] = df["close"].rolling(50).mean()
+    ma20 = df["close"].rolling(20).mean().iloc[-1]
+    ma50 = df["close"].rolling(50).mean().iloc[-1]
 
     vol = df["close"].pct_change().rolling(10).std().iloc[-1]
 
-    if df["ma20"].iloc[-1] > df["ma50"].iloc[-1]:
+    if ma20 > ma50:
         return "trend"
 
     if vol > 0.02:
@@ -102,46 +106,34 @@ def detect_market():
 
     return "sideway"
 
-# ===== STRATEGIES =====
+# ===== STRATEGY =====
 def trend(df):
-    df["ma20"] = df["close"].rolling(20).mean()
-    return df["close"].iloc[-1] > df["ma20"].iloc[-1]
+    return df["close"].iloc[-1] > df["close"].rolling(20).mean().iloc[-1]
 
 def mean(df):
-    df["rsi"] = RSIIndicator(df["close"], 14).rsi()
-    return df["rsi"].iloc[-1] < 30
+    rsi = (df["close"].diff().clip(lower=0).rolling(14).mean() /
+          df["close"].diff().abs().rolling(14).mean())*100
+    return rsi.iloc[-1] < 30
 
 def breakout(df):
     return df["close"].iloc[-1] > df["high"].rolling(20).max().iloc[-2]
 
-# ===== META AI CHOOSE =====
+# ===== META =====
 def choose_strategy(regime):
 
-    df = pd.read_csv(MEMORY_FILE)
+    df = pd.read_csv(MEMORY)
 
     df = df[df["regime"] == regime]
 
     if len(df) < 10:
-        return "trend"  # default
+        return "trend"
 
     stats = df.groupby("strategy")["result"].mean()
 
-    best = stats.idxmax()
+    return stats.idxmax()
 
-    print(f"🤖 META chọn: {best} trong {regime}")
-
-    return best
-
-# ===== SAVE MEMORY =====
-def update_memory(regime, strategy, result):
-
-    df = pd.read_csv(MEMORY_FILE)
-
-    new = pd.DataFrame([[regime, strategy, result]], columns=df.columns)
-
-    df = pd.concat([df, new], ignore_index=True)
-
-    df.to_csv(MEMORY_FILE, index=False)
+# ===== SYMBOL LIST =====
+symbols = ["FPT","VNM","ACB","DGC","REE"]
 
 # ===== SCAN =====
 def scan(strategy):
@@ -170,7 +162,7 @@ def scan(strategy):
             if best is None or momentum > best[1]:
                 best = (s, momentum, df)
 
-    if best is None:
+    if not best:
         return None
 
     s, m, df = best
@@ -181,25 +173,25 @@ def scan(strategy):
 
     return s, entry, sl, tp
 
-# ===== SAVE TRADE =====
-def save(symbol, entry, sl, tp, strategy, regime):
-    row = f"{datetime.now()},{symbol},{entry},{sl},{tp},0,{strategy},{regime}\n"
-    with open("trades_log.csv","a") as f:
-        f.write(row)
+# ===== SAVE =====
+def save_trade(symbol, entry, sl, tp, strat, regime):
+
+    df = pd.read_csv(LOG)
+
+    new = pd.DataFrame([[datetime.now(),symbol,entry,sl,tp,0,strat,regime]],
+                       columns=df.columns)
+
+    df = pd.concat([df,new],ignore_index=True)
+    df.to_csv(LOG,index=False)
 
 # ===== UPDATE RESULT =====
 def update_results():
 
-    df = pd.read_csv(LOG)
-    mem = pd.read_csv(MEMORY)
-
-    # reset index cho chắc
-    df = df.reset_index(drop=True)
-    mem = mem.reset_index(drop=True)
+    df = pd.read_csv(LOG).reset_index(drop=True)
+    mem = pd.read_csv(MEMORY).reset_index(drop=True)
 
     for i in range(len(df)):
 
-        # dùng iloc thay vì loc
         if df.iloc[i]["result"] != 0:
             continue
 
@@ -214,17 +206,17 @@ def update_results():
         for _, row in data.tail(5).iterrows():
 
             if row["low"] <= sl:
-                df.at[i, "result"] = -1
+                df.at[i,"result"] = -1
                 mem.loc[len(mem)] = [df.iloc[i]["regime"], df.iloc[i]["strategy"], -1]
                 break
 
             if row["high"] >= tp:
-                df.at[i, "result"] = 2
+                df.at[i,"result"] = 2
                 mem.loc[len(mem)] = [df.iloc[i]["regime"], df.iloc[i]["strategy"], 2]
                 break
 
-    df.to_csv(LOG, index=False)
-    mem.to_csv(MEMORY, index=False)
+    df.to_csv(LOG,index=False)
+    mem.to_csv(MEMORY,index=False)
 
 # ===== RUN =====
 def run():
@@ -232,11 +224,11 @@ def run():
     print("\n🚀 RUNNING...")
 
     regime = detect_market()
-    strategy = choose_strategy(regime)
+    strat = choose_strategy(regime)
 
-    print(f"📊 Regime: {regime} → Strategy: {strategy}")
+    print(f"📊 Regime: {regime} → Strategy: {strat}")
 
-    trade = scan(strategy)
+    trade = scan(strat)
 
     if not trade:
         print("❌ No trade")
@@ -248,7 +240,7 @@ def run():
 🔥 META AI TRADE
 
 Regime: {regime}
-Strategy: {strategy}
+Strategy: {strat}
 {symbol}
 Entry: {entry}
 SL: {sl}
@@ -258,11 +250,13 @@ TP: {tp}
     print(msg)
 
     send(msg)
-    save(symbol, entry, sl, tp, strategy, regime)
+    save_trade(symbol, entry, sl, tp, strat, regime)
 
 # ===== LOOP =====
 while True:
+
     run()
     update_results()
     push()
+
     time.sleep(300)
