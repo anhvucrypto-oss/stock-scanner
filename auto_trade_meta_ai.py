@@ -28,18 +28,15 @@ if not os.path.exists(MEMORY):
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        res = requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
-        print("📨 Telegram:", res.status_code)
-    except Exception as e:
-        print("❌ Telegram lỗi:", e)
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    except:
+        pass
 
 # ===== PUSH GITHUB =====
 def push():
-
     token = os.getenv("GITHUB_TOKEN")
-
     if not token:
-        print("❌ Không có GITHUB_TOKEN")
+        print("❌ No token")
         return
 
     try:
@@ -63,11 +60,10 @@ def push():
             data["sha"] = sha
 
         res = requests.put(url, json=data, headers=headers)
-
         print("📡 GitHub:", res.status_code)
 
     except Exception as e:
-        print("❌ push lỗi:", e)
+        print("❌ push error:", e)
 
 # ===== DATA =====
 def get_data(symbol):
@@ -88,22 +84,18 @@ def get_data(symbol):
 
 # ===== MARKET =====
 def detect_market():
-
     df = get_data("VNINDEX")
     if df is None:
         return "unknown"
 
     ma20 = df["close"].rolling(20).mean().iloc[-1]
     ma50 = df["close"].rolling(50).mean().iloc[-1]
-
     vol = df["close"].pct_change().rolling(10).std().iloc[-1]
 
     if ma20 > ma50:
         return "trend"
-
     if vol > 0.02:
         return "breakout"
-
     return "sideway"
 
 # ===== STRATEGY =====
@@ -120,28 +112,23 @@ def breakout(df):
 
 # ===== META =====
 def choose_strategy(regime):
-
     df = pd.read_csv(MEMORY)
-
     df = df[df["regime"] == regime]
 
     if len(df) < 10:
         return "trend"
 
     stats = df.groupby("strategy")["result"].mean()
-
     return stats.idxmax()
 
-# ===== SYMBOL LIST =====
+# ===== SYMBOL =====
 symbols = ["FPT","VNM","ACB","DGC","REE"]
 
 # ===== SCAN =====
 def scan(strategy):
-
     best = None
 
     for s in symbols:
-
         df = get_data(s)
         if df is None:
             continue
@@ -156,7 +143,6 @@ def scan(strategy):
             signal = breakout(df)
 
         if signal:
-
             momentum = (df["close"].iloc[-1] - df["close"].iloc[-4]) / df["close"].iloc[-4]
 
             if best is None or momentum > best[1]:
@@ -173,18 +159,29 @@ def scan(strategy):
 
     return s, entry, sl, tp
 
-# ===== SAVE =====
+# ===== SAVE (FIXED) =====
 def save_trade(symbol, entry, sl, tp, strat, regime):
 
-    df = pd.read_csv(LOG)
+    new = pd.DataFrame([{
+        "time": datetime.now(),
+        "symbol": symbol,
+        "entry": entry,
+        "sl": sl,
+        "tp": tp,
+        "result": 0,
+        "strategy": strat,
+        "regime": regime
+    }])
 
-    new = pd.DataFrame([[datetime.now(),symbol,entry,sl,tp,0,strat,regime]],
-                       columns=df.columns)
+    if os.path.exists(LOG):
+        df = pd.read_csv(LOG)
+        df = pd.concat([df, new], ignore_index=True)
+    else:
+        df = new
 
-    df = pd.concat([df,new],ignore_index=True)
-    df.to_csv(LOG,index=False)
+    df.to_csv(LOG, index=False)
 
-# ===== UPDATE RESULT =====
+# ===== UPDATE =====
 def update_results():
 
     df = pd.read_csv(LOG).reset_index(drop=True)
@@ -226,30 +223,18 @@ def run():
     regime = detect_market()
     strat = choose_strategy(regime)
 
-    print(f"📊 Regime: {regime} → Strategy: {strat}")
+    print("Regime:", regime, "| Strategy:", strat)
 
     trade = scan(strat)
 
     if not trade:
-        print("❌ No trade")
+        print("No trade")
         return
 
     symbol, entry, sl, tp = trade
 
-    msg = f"""
-🔥 META AI TRADE
+    send(f"{symbol} | {strat} | {regime}")
 
-Regime: {regime}
-Strategy: {strat}
-{symbol}
-Entry: {entry}
-SL: {sl}
-TP: {tp}
-"""
-
-    print(msg)
-
-    send(msg)
     save_trade(symbol, entry, sl, tp, strat, regime)
 
 # ===== LOOP =====
