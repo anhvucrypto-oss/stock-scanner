@@ -183,3 +183,8 @@ while True:
     push()
 
     time.sleep(60)
+
+while True:
+    run()
+    push()
+    time.sleep(60)
