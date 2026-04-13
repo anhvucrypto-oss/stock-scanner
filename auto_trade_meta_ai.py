@@ -17,6 +17,8 @@ FILE_PATH = "trades_log.csv"
 LOG = "trades_log.csv"
 MEMORY = "meta_memory.csv"
 
+last_report_date = None
+
 # ===== INIT FILE =====
 if not os.path.exists(LOG):
     pd.DataFrame(columns=["time","symbol","entry","sl","tp","result","strategy","regime"]).to_csv(LOG,index=False)
@@ -32,11 +34,10 @@ def send(msg):
     except:
         pass
 
-# ===== PUSH GITHUB =====
+# ===== PUSH =====
 def push():
     token = os.getenv("GITHUB_TOKEN")
     if not token:
-        print("❌ No token")
         return
 
     try:
@@ -59,11 +60,10 @@ def push():
         if sha:
             data["sha"] = sha
 
-        res = requests.put(url, json=data, headers=headers)
-        print("📡 GitHub:", res.status_code)
+        requests.put(url, json=data, headers=headers)
 
-    except Exception as e:
-        print("❌ push error:", e)
+    except:
+        pass
 
 # ===== DATA =====
 def get_data(symbol):
@@ -85,13 +85,11 @@ def get_data(symbol):
 # ===== MARKET =====
 def detect_market():
     df = get_data("VNINDEX")
-
     if df is None or len(df) < 50:
-        return "sideway"   # FIX
+        return "sideway"
 
     ma20 = df["close"].rolling(20).mean().iloc[-1]
     ma50 = df["close"].rolling(50).mean().iloc[-1]
-
     vol = df["close"].pct_change().rolling(10).std().iloc[-1]
 
     if ma20 > ma50:
@@ -162,7 +160,7 @@ def scan(strategy):
 
     return s, entry, sl, tp
 
-# ===== SAVE (FIXED) =====
+# ===== SAVE TRADE =====
 def save_trade(symbol, entry, sl, tp, strat, regime):
 
     new = pd.DataFrame([{
@@ -176,15 +174,29 @@ def save_trade(symbol, entry, sl, tp, strat, regime):
         "regime": regime
     }])
 
-    if os.path.exists(LOG):
-        df = pd.read_csv(LOG)
-        df = pd.concat([df, new], ignore_index=True)
-    else:
-        df = new
-
+    df = pd.read_csv(LOG)
+    df = pd.concat([df, new], ignore_index=True)
     df.to_csv(LOG, index=False)
 
-# ===== UPDATE =====
+# ===== SAVE NO TRADE =====
+def save_log(symbol, strat, regime):
+
+    new = pd.DataFrame([{
+        "time": datetime.now(),
+        "symbol": symbol,
+        "entry": 0,
+        "sl": 0,
+        "tp": 0,
+        "result": 0,
+        "strategy": strat,
+        "regime": regime
+    }])
+
+    df = pd.read_csv(LOG)
+    df = pd.concat([df, new], ignore_index=True)
+    df.to_csv(LOG, index=False)
+
+# ===== UPDATE RESULT =====
 def update_results():
 
     df = pd.read_csv(LOG).reset_index(drop=True)
@@ -196,6 +208,10 @@ def update_results():
             continue
 
         symbol = df.iloc[i]["symbol"]
+
+        if symbol == "NO_TRADE":
+            continue
+
         sl = df.iloc[i]["sl"]
         tp = df.iloc[i]["tp"]
 
@@ -218,6 +234,40 @@ def update_results():
     df.to_csv(LOG,index=False)
     mem.to_csv(MEMORY,index=False)
 
+# ===== DAILY REPORT =====
+def daily_report():
+
+    global last_report_date
+
+    today = datetime.now().date()
+
+    if last_report_date == today:
+        return
+
+    df = pd.read_csv(LOG)
+
+    if df.empty:
+        return
+
+    df["result"] = pd.to_numeric(df["result"], errors="coerce")
+
+    total = len(df)
+    win = len(df[df["result"] > 0])
+    winrate = round(win / total * 100, 2) if total > 0 else 0
+    pnl = df["result"].sum()
+
+    msg = f"""
+📊 DAILY REPORT
+
+Trades: {total}
+Winrate: {winrate}%
+PnL (R): {round(pnl,2)}
+"""
+
+    send(msg)
+
+    last_report_date = today
+
 # ===== RUN =====
 def run():
 
@@ -231,13 +281,27 @@ def run():
     trade = scan(strat)
 
     if not trade:
-        print("No trade")
+        msg = f"❌ No trade | {strat} | {regime}"
+        print(msg)
+        send(msg)
+        save_log("NO_TRADE", strat, regime)
         return
 
     symbol, entry, sl, tp = trade
 
-    send(f"{symbol} | {strat} | {regime}")
+    msg = f"""
+🔥 TRADE
 
+{symbol}
+Strategy: {strat}
+Regime: {regime}
+Entry: {entry}
+SL: {sl}
+TP: {tp}
+"""
+    print(msg)
+
+    send(msg)
     save_trade(symbol, entry, sl, tp, strat, regime)
 
 # ===== LOOP =====
@@ -245,6 +309,7 @@ while True:
 
     run()
     update_results()
+    daily_report()
     push()
 
     time.sleep(300)
