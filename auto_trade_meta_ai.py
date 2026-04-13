@@ -6,6 +6,7 @@ import base64
 from datetime import datetime
 
 print("🚀 META AI FINAL START")
+send("BOT START OK")
 
 TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
 CHAT_ID = "1329522024"
@@ -25,12 +26,19 @@ if not os.path.exists(MEMORY):
 
 # TELEGRAM
 def send(msg):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
-        print("📨", msg.strip())   # 👈 CMD = TELE giống nhau
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    except:
-        pass
+        res = requests.post(
+            url,
+            json={
+                "chat_id": CHAT_ID,
+                "text": msg
+            },
+            timeout=10
+        )
+        print("📨 Telegram status:", res.status_code, res.text)
+    except Exception as e:
+        print("❌ Telegram error:", e)
 
 # PUSH
 def push():
