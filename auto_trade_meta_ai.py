@@ -85,17 +85,20 @@ def get_data(symbol):
 # ===== MARKET =====
 def detect_market():
     df = get_data("VNINDEX")
-    if df is None:
-        return "unknown"
+
+    if df is None or len(df) < 50:
+        return "sideway"   # FIX
 
     ma20 = df["close"].rolling(20).mean().iloc[-1]
     ma50 = df["close"].rolling(50).mean().iloc[-1]
+
     vol = df["close"].pct_change().rolling(10).std().iloc[-1]
 
     if ma20 > ma50:
         return "trend"
     if vol > 0.02:
         return "breakout"
+
     return "sideway"
 
 # ===== STRATEGY =====
