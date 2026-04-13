@@ -146,10 +146,13 @@ def run():
 
     # ❌ MARKET XẤU
     if not market_ok():
-        msg = "❌ Market xấu → không trade"
-        send(msg)
-        log_no_trade()
-        return
+    msg = "❌ Market xấu → không trade"
+    send(msg)
+
+    # 👇 BẮT BUỘC PHẢI CÓ
+    save("NO_TRADE", 0, 0, 0)
+
+    return
 
     trade = find_trade()
 
