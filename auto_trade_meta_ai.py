@@ -180,7 +180,7 @@ TP: {tp}
 while True:
     run()
     push()
-    time.sleep(60)
+    time.sleep(70)
 
 
     
