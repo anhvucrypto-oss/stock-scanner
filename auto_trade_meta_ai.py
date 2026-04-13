@@ -187,34 +187,41 @@ def save(symbol, entry, sl, tp, strategy, regime):
 # ===== UPDATE RESULT =====
 def update_results():
 
-    df = pd.read_csv("trades_log.csv")
+    df = pd.read_csv(LOG)
+    mem = pd.read_csv(MEMORY)
+
+    # reset index cho chắc
+    df = df.reset_index(drop=True)
+    mem = mem.reset_index(drop=True)
 
     for i in range(len(df)):
 
-        if df.loc[i,"result"] != 0:
+        # dùng iloc thay vì loc
+        if df.iloc[i]["result"] != 0:
             continue
 
-        symbol = df.loc[i,"symbol"]
-        sl = df.loc[i,"sl"]
-        tp = df.loc[i,"tp"]
+        symbol = df.iloc[i]["symbol"]
+        sl = df.iloc[i]["sl"]
+        tp = df.iloc[i]["tp"]
 
         data = get_data(symbol)
         if data is None:
             continue
 
-        recent = data.tail(5)
+        for _, row in data.tail(5).iterrows():
 
-        for _, row in recent.iterrows():
             if row["low"] <= sl:
-                df.loc[i,"result"] = -1
-                update_memory(df.loc[i,"regime"], df.loc[i,"strategy"], -1)
-                break
-            if row["high"] >= tp:
-                df.loc[i,"result"] = 2
-                update_memory(df.loc[i,"regime"], df.loc[i,"strategy"], 2)
+                df.at[i, "result"] = -1
+                mem.loc[len(mem)] = [df.iloc[i]["regime"], df.iloc[i]["strategy"], -1]
                 break
 
-    df.to_csv("trades_log.csv", index=False)
+            if row["high"] >= tp:
+                df.at[i, "result"] = 2
+                mem.loc[len(mem)] = [df.iloc[i]["regime"], df.iloc[i]["strategy"], 2]
+                break
+
+    df.to_csv(LOG, index=False)
+    mem.to_csv(MEMORY, index=False)
 
 # ===== RUN =====
 def run():
