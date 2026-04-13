@@ -16,6 +16,9 @@ CHAT_ID = "1329522024"
 REPO = "anhvucrypto-oss/stock-scanner"
 FILE_PATH = "trades_log.csv"
 
+LOG = "trades_log.csv"
+MEMORY = "meta_memory.csv"
+
 # ===== MEMORY FILE =====
 MEMORY_FILE = "meta_memory.csv"
 
