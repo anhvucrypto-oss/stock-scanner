@@ -144,23 +144,24 @@ def run():
 
     print("\n🚀 RUNNING...")
 
-    # ❌ MARKET XẤU
-  if not market_ok():
-    msg = "❌ Market xấu → không trade"
-    send(msg)
-    save("NO_TRADE", 0, 0, 0)
-    return
+    # MARKET CHECK
+    if not market_ok():
+        msg = "❌ Market xấu → không trade"
+        send(msg)
+        save("NO_TRADE", 0, 0, 0)
+        return
 
+    # FIND TRADE
     trade = find_trade()
 
-    # ❌ KHÔNG CÓ KÈO
+    # NO SETUP
     if trade is None:
         msg = "❌ No trade setup"
         send(msg)
-        log_no_trade()
+        save("NO_TRADE", 0, 0, 0)
         return
 
-    # ✅ CÓ KÈO
+    # HAVE TRADE
     symbol, entry, sl, tp = trade
 
     msg = f"""
@@ -171,8 +172,8 @@ Entry: {entry}
 SL: {sl}
 TP: {tp}
 """
-    send(msg)
 
+    send(msg)
     save(symbol, entry, sl, tp)
 
 # ===== LOOP =====
