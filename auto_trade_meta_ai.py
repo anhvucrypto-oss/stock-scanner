@@ -14,6 +14,7 @@ CHAT_ID = "1329522024"
 
 REPO = "anhvucrypto-oss/stock-scanner"
 FILE_PATH = "trades_log.csv"
+LAST_STATE = None
 
 # ===== INIT FILE =====
 if not os.path.exists("trades_log.csv"):
@@ -141,27 +142,35 @@ def log_no_trade():
 
 # ===== RUN =====
 def run():
+    global LAST_STATE
 
     print("\n🚀 RUNNING...")
 
-    # MARKET CHECK
+    # MARKET XẤU
     if not market_ok():
-        msg = "❌ Market xấu → không trade"
-        send(msg)
+
+        if LAST_STATE != "NO_TRADE":
+            msg = "❌ Thị trường xấu, NO TRADE, sẽ báo khi có tín hiệu TRADE"
+            send(msg)
+            LAST_STATE = "NO_TRADE"
+
         save("NO_TRADE", 0, 0, 0)
         return
 
-    # FIND TRADE
+    # TÌM KÈO
     trade = find_trade()
 
-    # NO SETUP
     if trade is None:
-        msg = "❌ No trade setup"
-        send(msg)
+
+        if LAST_STATE != "NO_TRADE":
+            msg = "❌ Không có setup, NO TRADE"
+            send(msg)
+            LAST_STATE = "NO_TRADE"
+
         save("NO_TRADE", 0, 0, 0)
         return
 
-    # HAVE TRADE
+    # CÓ TRADE
     symbol, entry, sl, tp = trade
 
     msg = f"""
@@ -174,6 +183,8 @@ TP: {tp}
 """
 
     send(msg)
+    LAST_STATE = "TRADE"
+
     save(symbol, entry, sl, tp)
 
 # ===== LOOP =====
