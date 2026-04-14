@@ -20,14 +20,28 @@ def send(msg):
 # ===== LOAD SYMBOLS =====
 def load_symbols():
     try:
-        df = pd.read_csv("symbols.csv")
+        url = "https://raw.githubusercontent.com/anhvucrypto-oss/stock-scanner/main/symbols.csv"
+
+        df = pd.read_csv(url)
+
         symbols = df["symbol"].dropna().tolist()
+
+        print("🌐 Load symbols từ GitHub")
         print("📊 Symbols:", symbols)
-        print("📊 Tổng số mã:", len(symbols))
+
         return symbols
+
     except Exception as e:
-        print("❌ Lỗi load symbols:", e)
-        return []
+        print("❌ Lỗi load GitHub:", e)
+
+        # fallback local
+        try:
+            df = pd.read_csv("symbols.csv")
+            symbols = df["symbol"].dropna().tolist()
+            print("📁 Fallback local symbols")
+            return symbols
+        except:
+            return []
 
 # ===== GET DATA =====
 def get_data(symbol):
