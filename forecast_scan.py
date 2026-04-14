@@ -3,42 +3,79 @@ import requests
 from datetime import datetime
 import os
 
+# ===== CONFIG =====
 FILE = "forecast.csv"
 
-symbols = ["FPT","VNM","ACB","DGC","REE"]
+TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
+CHAT_ID = "1329522024"
 
+# ===== TELEGRAM =====
+def send(msg):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    except:
+        pass
+
+# ===== LOAD SYMBOLS =====
+def load_symbols():
+    try:
+        df = pd.read_csv("symbols.csv")
+        symbols = df["symbol"].dropna().tolist()
+        print("📊 Symbols:", symbols)
+        print("📊 Tổng số mã:", len(symbols))
+        return symbols
+    except Exception as e:
+        print("❌ Lỗi load symbols:", e)
+        return []
+
+# ===== GET DATA =====
 def get_data(symbol):
     try:
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&resolution=1D&from=1700000000&to=9999999999"
-        data = requests.get(url).json()
+        data = requests.get(url, timeout=10).json()
+
+        if "c" not in data:
+            return None
+
         return pd.DataFrame({
             "close": data["c"],
             "high": data["h"],
             "low": data["l"]
         })
+
     except:
         return None
 
+# ===== SIGNAL =====
 def signal(df):
-    ma20 = df["close"].rolling(20).mean()
-    if df["close"].iloc[-1] > ma20.iloc[-1]:
-        return True
-    return False
+    if len(df) < 25:
+        return False
 
+    ma20 = df["close"].rolling(20).mean()
+    return df["close"].iloc[-1] > ma20.iloc[-1]
+
+# ===== MAIN SCAN =====
 def scan():
+
+    print("\n⏰ START FORECAST:", datetime.now())
+
+    symbols = load_symbols()
 
     results = []
 
     for s in symbols:
 
         df = get_data(s)
+
         if df is None:
+            print(f"❌ {s} lỗi data")
             continue
 
         if signal(df):
 
-            entry = df["close"].iloc[-1]
-            target = round(entry * 1.06,1)
+            entry = round(df["close"].iloc[-1], 1)
+            target = round(entry * 1.06, 1)
 
             results.append({
                 "time": datetime.now(),
@@ -47,9 +84,15 @@ def scan():
                 "target_T4": target
             })
 
-    df_out = pd.DataFrame(results)
+            print(f"✅ {s} PASS")
 
-    if df_out.empty:
+        else:
+            print(f"➖ {s} NO SIGNAL")
+
+    # ===== SAVE FILE =====
+    if results:
+        df_out = pd.DataFrame(results)
+    else:
         df_out = pd.DataFrame([{
             "time": datetime.now(),
             "symbol": "NO_SIGNAL",
@@ -59,15 +102,16 @@ def scan():
 
     df_out.to_csv(FILE, index=False)
 
-    print("✅ Forecast updated")
+    print("💾 Saved forecast.csv")
 
+    # ===== TELEGRAM =====
+    msg = f"📊 T+4 Forecast: {len(results)} mã"
+    send(msg)
+
+    print("📨 Telegram sent")
+    print("✅ DONE:", datetime.now())
+
+
+# ===== RUN =====
 if __name__ == "__main__":
     scan()
-def send(msg):
-    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                  data={"chat_id": CHAT_ID, "text": msg})
-
-# sau khi scan xong
-if not df_out.empty:
-    msg = "📊 T+4 Forecast:\n" + str(df_out.head())
-    send(msg)
