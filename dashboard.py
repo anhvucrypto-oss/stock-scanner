@@ -28,3 +28,11 @@ while True:
 
     time.sleep(2)
     st.rerun()
+
+st.subheader("📊 T+4 Forecast")
+
+if os.path.exists("forecast.csv"):
+    df_f = pd.read_csv("forecast.csv")
+    st.dataframe(df_f, width="stretch")
+else:
+    st.warning("Chưa có forecast")
