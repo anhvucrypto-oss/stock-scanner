@@ -30,8 +30,11 @@ def is_weekday():
     return datetime.now().weekday() < 5
 
 def is_target_time():
-    now = datetime.now().strftime("%H:%M")
-    return now in ["12:00", "15:00"]
+    now = datetime.now()
+    return (
+        (now.hour == 12 and now.minute < 2) or
+        (now.hour == 15 and now.minute < 2)
+    )
 
 # ===== MAIN LOOP =====
 try:
