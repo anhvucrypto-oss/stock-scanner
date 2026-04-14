@@ -1,45 +1,64 @@
 import streamlit as st
 import pandas as pd
-import time
 import os
+import time
 
 st.set_page_config(layout="wide")
-st.title("📊 LIVE DASHBOARD (LOCAL)")
 
-FILE = "trades_log.csv"
+st.title("📊 TRADING DASHBOARD")
 
-placeholder = st.empty()
+# ===== AUTO REFRESH =====
+st.caption("Auto refresh mỗi 5 giây")
+time.sleep(5)
+st.rerun()
 
-while True:
+# ==============================
+# 📈 TRADES LOG
+# ==============================
+st.subheader("📈 Trades Log")
 
-    try:
-        if not os.path.exists(FILE):
-            placeholder.warning("Chưa có file trades_log.csv")
-        else:
-            df = pd.read_csv(FILE)
+if os.path.exists("trades_log.csv"):
 
-            if df.empty:
-                placeholder.warning("Chưa có data")
-            else:
-                placeholder.dataframe(df.tail(20), width="stretch")
+    df = pd.read_csv("trades_log.csv")
 
-    except Exception as e:
-        placeholder.error(f"Lỗi: {e}")
+    if not df.empty:
 
-    time.sleep(2)
-    st.rerun()
+        if "time" in df.columns:
+            df["time"] = pd.to_datetime(df["time"], errors="coerce")
+            df = df.sort_values(by="time", ascending=False)
 
+        st.dataframe(df, width="stretch")
+
+    else:
+        st.warning("Trades log rỗng")
+
+else:
+    st.warning("Chưa có trades_log.csv")
+
+
+# ==============================
+# 📊 FORECAST T+4
+# ==============================
 st.subheader("📊 T+4 Forecast")
 
 if os.path.exists("forecast.csv"):
+
     df_f = pd.read_csv("forecast.csv")
 
-# convert time
-df_f["time"] = pd.to_datetime(df_f["time"], errors="coerce")
+    if not df_f.empty:
 
-# sort mới nhất lên trên
-df_f = df_f.sort_values(by="time", ascending=False)
+        if "time" in df_f.columns:
+            df_f["time"] = pd.to_datetime(df_f["time"], errors="coerce")
+            df_f = df_f.sort_values(by="time", ascending=False)
 
-st.dataframe(df_f, width="stretch")
+        # chỉ lấy lần scan mới nhất
+        latest_time = df_f["time"].max()
+        df_f = df_f[df_f["time"] == latest_time]
+
+        st.dataframe(df_f, width="stretch")
+
+    else:
+        st.warning("Forecast rỗng")
+
 else:
-    st.warning("Chưa có forecast")
+    st.warning("Chưa có forecast.csv")
