@@ -40,7 +40,7 @@ try:
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
         if is_weekday() and is_target_time():
-            global last_run
+
             if last_run != now:
                 print(f"⏰ RUN FORECAST {now}")
                 subprocess.Popen(["python", "forecast_scan.py"])
