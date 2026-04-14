@@ -21,7 +21,7 @@ while True:
             if df.empty:
                 placeholder.warning("Chưa có data")
             else:
-                placeholder.dataframe(df.tail(20), use_container_width=True)
+                placeholder.dataframe(df.tail(20), width="stretch")
 
     except Exception as e:
         placeholder.error(f"Lỗi: {e}")
