@@ -1,17 +1,16 @@
 import time
 from datetime import datetime
 import threading
-import sys
 import os
+import subprocess
 
-# ===== IMPORT MODULE =====
 import forecast_scan
 import auto_trade_meta_ai
 
 running = True
 
 
-# ===== STOP HANDLER =====
+# ===== STOP =====
 def stop_listener():
     global running
     input()
@@ -19,25 +18,36 @@ def stop_listener():
     running = False
 
 
-# ===== CHECK TIME WINDOW =====
-def in_trading_time():
+# ===== MỞ DASHBOARD =====
+def start_dashboard():
+    try:
+        subprocess.Popen(
+            ["python", "-m", "streamlit", "run", "dashboard.py"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        print("🌐 Dashboard started")
+    except Exception as e:
+        print("❌ Dashboard lỗi:", e)
+
+
+# ===== TIME =====
+def in_time():
 
     now = datetime.now()
     h = now.hour
     m = now.minute
 
-    # 12:00 → 12:05
     if h == 12 and m <= 5:
         return True
 
-    # 13:00 → 15:05
     if (h == 13) or (h == 14) or (h == 15 and m <= 5):
         return True
 
     return False
 
 
-# ===== MAIN LOOP =====
+# ===== MAIN =====
 def run():
 
     global running
@@ -45,19 +55,20 @@ def run():
     print("🚀 SYSTEM START")
     print("👉 Bấm Enter để dừng")
 
-    # thread nghe stop
     threading.Thread(target=stop_listener, daemon=True).start()
+
+    # ===== MỞ DASHBOARD NGAY TỪ ĐẦU =====
+    start_dashboard()
 
     while running:
 
         now = datetime.now()
 
-        # ===== STOP SAU 15:05 =====
         if now.hour == 15 and now.minute > 5:
-            print("🛑 Hết giờ → dừng hệ thống")
+            print("🛑 Hết giờ → dừng")
             break
 
-        if in_trading_time():
+        if in_time():
 
             print(f"\n⏰ RUN @ {now.strftime('%H:%M:%S')}")
 
@@ -67,15 +78,13 @@ def run():
             except Exception as e:
                 print("❌ Lỗi:", e)
 
-            time.sleep(60)  # chạy mỗi phút
+            time.sleep(60)
 
         else:
-            # ngoài giờ → ngủ nhẹ
             time.sleep(10)
 
-    print("✅ SYSTEM STOPPED")
+    print("✅ STOPPED")
 
 
-# ===== RUN =====
 if __name__ == "__main__":
     run()
