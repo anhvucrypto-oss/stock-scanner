@@ -3,6 +3,7 @@ import requests
 from datetime import datetime
 import os
 
+# ===== FIX PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 FILE = "forecast.csv"
@@ -14,6 +15,7 @@ CHAT_ID = "1329522024"
 NAV = 100_000_000
 
 
+# ===== TELEGRAM =====
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -22,14 +24,16 @@ def send(msg):
         pass
 
 
+# ===== LOAD SYMBOL =====
 def load_symbols():
     try:
         df = pd.read_csv("symbols.csv")
-        return df["symbol"].dropna().tolist()
+        return df["symbol"].dropna().astype(str).tolist()
     except:
         return []
 
 
+# ===== GET DATA =====
 def get_data(symbol):
     try:
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&resolution=1D&from=1700000000&to=9999999999"
@@ -45,7 +49,9 @@ def get_data(symbol):
         return None
 
 
+# ===== SCORE =====
 def compute_score(df):
+
     if len(df) < 50:
         return None
 
@@ -73,12 +79,14 @@ def compute_score(df):
     return round(score,4)
 
 
+# ===== BACKTEST =====
 def backtest(df):
 
     wins = 0
     total = 0
 
     for i in range(50, len(df)-5):
+
         entry = df["close"].iloc[i]
         tp = entry * 1.04
         sl = entry * 0.98
@@ -93,6 +101,7 @@ def backtest(df):
     return round(wins/total,3) if total else 0
 
 
+# ===== STATE =====
 def load_state():
     if not os.path.exists(STATE_FILE):
         return None
@@ -103,10 +112,13 @@ def load_state():
 
 
 def save_state(df):
-    df.to_json(STATE_FILE)
+    df.to_json(STATE_FILE, date_format="iso")
 
 
+# ===== MAIN =====
 def scan():
+
+    print("\n⏰ START:", datetime.now())
 
     symbols = load_symbols()
     results = []
@@ -152,12 +164,16 @@ def scan():
     # ===== TOP 3 =====
     df_out = df_out.sort_values(by=["score","winrate"], ascending=False).head(3)
 
+    # ===== RESET INDEX (QUAN TRỌNG) =====
+    df_out = df_out.reset_index(drop=True)
+
     # ===== LUÔN GHI FILE =====
     df_out.to_csv(FILE, index=False)
 
+    print("📄 Saved forecast.csv")
+
     # ===== CHECK CHANGE =====
     old = load_state()
-
     new = df_out.to_dict()
 
     if old == new:
@@ -167,12 +183,13 @@ def scan():
     save_state(df_out)
 
     # ===== TELEGRAM =====
-    weights = [0.5,0.3,0.2]
+    weights = [0.5, 0.3, 0.2]
 
     msg = "TOP 3 T+4 PICKS\n\n"
 
-    for i, row in df_out.iterrows():
-        capital = int(NAV * weights[i])
+    for idx, row in df_out.iterrows():
+
+        capital = int(NAV * weights[idx])
 
         msg += (
             f"{row['symbol']}\n"
@@ -185,6 +202,10 @@ def scan():
 
     send(msg)
 
+    print("📨 Sent Telegram")
+    print("✅ DONE:", datetime.now())
 
+
+# ===== RUN =====
 if __name__ == "__main__":
     scan()
