@@ -3,7 +3,7 @@ import requests
 from datetime import datetime
 import os
 
-# ===== FIX PATH (QUAN TRỌNG) =====
+# ===== FIX PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # ===== CONFIG =====
@@ -17,34 +17,15 @@ def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    except Exception as e:
-        print("❌ Telegram lỗi:", e)
+    except:
+        pass
 
 # ===== LOAD SYMBOLS =====
 def load_symbols():
     try:
-        if not os.path.exists("symbols.csv"):
-            print("❌ Không tìm thấy symbols.csv")
-            return []
-
         df = pd.read_csv("symbols.csv")
-
-        if "symbol" not in df.columns:
-            print("❌ symbols.csv thiếu cột 'symbol'")
-            return []
-
-        symbols = df["symbol"].dropna().astype(str).tolist()
-
-        if len(symbols) == 0:
-            print("❌ symbols.csv rỗng")
-        else:
-            print("📊 Loaded symbols:", symbols)
-            print("📊 Tổng số mã:", len(symbols))
-
-        return symbols
-
-    except Exception as e:
-        print("❌ Lỗi load symbols:", e)
+        return df["symbol"].dropna().astype(str).tolist()
+    except:
         return []
 
 # ===== GET DATA =====
@@ -59,30 +40,62 @@ def get_data(symbol):
         return pd.DataFrame({
             "close": data["c"],
             "high": data["h"],
-            "low": data["l"]
+            "low": data["l"],
+            "volume": data.get("v", [0]*len(data["c"]))
         })
 
-    except Exception as e:
-        print(f"❌ {symbol} lỗi API:", e)
+    except:
         return None
 
-# ===== SIGNAL =====
-def signal(df):
-    if len(df) < 25:
-        return False
+# ===== INDICATORS =====
+def compute_score(df):
 
-    ma20 = df["close"].rolling(20).mean()
-    return df["close"].iloc[-1] > ma20.iloc[-1]
+    if len(df) < 30:
+        return None
+
+    close = df["close"]
+
+    # ===== MOMENTUM =====
+    momentum = (close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]
+
+    # ===== BREAKOUT =====
+    breakout = close.iloc[-1] > close.rolling(20).max().iloc[-2]
+
+    # ===== VOLUME =====
+    vol = df["volume"]
+    vol_score = vol.iloc[-1] / (vol.rolling(20).mean().iloc[-1] + 1)
+
+    # ===== RSI =====
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = -delta.clip(upper=0).rolling(14).mean()
+    rs = gain / (loss + 1e-9)
+    rsi = 100 - (100 / (1 + rs))
+
+    rsi_val = rsi.iloc[-1]
+
+    # ===== FILTER =====
+    if rsi_val > 75:   # quá mua → bỏ
+        return None
+
+    # ===== SCORE COMBINE =====
+    score = (
+        momentum * 0.5 +
+        (1 if breakout else 0) * 0.3 +
+        min(vol_score, 2) * 0.2
+    )
+
+    return round(score, 4), round(momentum,4), breakout, round(vol_score,2), round(rsi_val,1)
 
 # ===== MAIN =====
 def scan():
 
-    print("\n⏰ START FORECAST:", datetime.now())
+    print("\n⏰ START AI FORECAST:", datetime.now())
 
     symbols = load_symbols()
 
-    if len(symbols) == 0:
-        print("❌ KHÔNG CÓ SYMBOL → DỪNG")
+    if not symbols:
+        print("❌ No symbols")
         return
 
     results = []
@@ -92,47 +105,62 @@ def scan():
         df = get_data(s)
 
         if df is None:
-            print(f"❌ {s} lỗi data")
             continue
 
-        if signal(df):
+        res = compute_score(df)
 
-            entry = round(df["close"].iloc[-1], 1)
-            target = round(entry * 1.06, 1)
+        if res is None:
+            continue
 
-            results.append({
-                "time": datetime.now(),
-                "symbol": s,
-                "entry": entry,
-                "target_T4": target
-            })
+        score, momentum, breakout, vol_score, rsi = res
 
-            print(f"✅ {s} PASS")
+        entry = round(df["close"].iloc[-1],1)
+        target = round(entry * 1.06,1)
 
-        else:
-            print(f"➖ {s} NO SIGNAL")
+        results.append({
+            "symbol": s,
+            "entry": entry,
+            "target_T4": target,
+            "score": score,
+            "momentum": momentum,
+            "breakout": breakout,
+            "volume": vol_score,
+            "rsi": rsi
+        })
 
-    # ===== SAVE FILE =====
-    if results:
-        df_out = pd.DataFrame(results)
-    else:
-        df_out = pd.DataFrame([{
-            "time": datetime.now(),
-            "symbol": "NO_SIGNAL",
-            "entry": 0,
-            "target_T4": 0
-        }])
+    df_out = pd.DataFrame(results)
 
-    df_out.to_csv(FILE, index=False)
+    if df_out.empty:
+        print("❌ No signal")
+        return
 
-    print("💾 Saved forecast.csv")
+    # ===== RANK =====
+    df_out = df_out.sort_values(by="score", ascending=False)
+
+    top = df_out.head(3)
+    top["time"] = datetime.now()
+
+    top.to_csv(FILE, index=False)
+
+    print("🏆 TOP PICKS:")
+    print(top)
 
     # ===== TELEGRAM =====
-    msg = f"📊 T+4 Forecast: {len(results)} mã"
+    msg = "🔥 TOP 3 T+4 STRONGEST\n\n"
+
+    for _, row in top.iterrows():
+        msg += (
+            f"{row['symbol']}\n"
+            f"Score: {row['score']}\n"
+            f"Momentum: {row['momentum']}\n"
+            f"Volume: {row['volume']}\n"
+            f"RSI: {row['rsi']}\n"
+            f"Target: {row['target_T4']}\n\n"
+        )
+
     send(msg)
 
-    print("📨 Telegram sent")
-    print("✅ DONE:", datetime.now())
+    print("📨 Sent Telegram")
 
 
 # ===== RUN =====
