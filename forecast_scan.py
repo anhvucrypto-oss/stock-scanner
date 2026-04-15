@@ -115,6 +115,28 @@ def save_state(df):
     df.to_json(STATE_FILE, date_format="iso")
 
 
+# ===== SAFE SAVE (ANTI-LOCK) =====
+def safe_save(df):
+
+    temp_file = "forecast_temp.csv"
+
+    try:
+        df.to_csv(temp_file, index=False)
+
+        if os.path.exists(FILE):
+            try:
+                os.remove(FILE)
+            except:
+                pass
+
+        os.rename(temp_file, FILE)
+
+        print("📄 Saved forecast.csv")
+
+    except Exception as e:
+        print("❌ Lỗi ghi file:", e)
+
+
 # ===== MAIN =====
 def scan():
 
@@ -164,13 +186,11 @@ def scan():
     # ===== TOP 3 =====
     df_out = df_out.sort_values(by=["score","winrate"], ascending=False).head(3)
 
-    # ===== RESET INDEX (QUAN TRỌNG) =====
+    # ===== RESET INDEX =====
     df_out = df_out.reset_index(drop=True)
 
-    # ===== LUÔN GHI FILE =====
-    df_out.to_csv(FILE, index=False)
-
-    print("📄 Saved forecast.csv")
+    # ===== SAVE FILE (ANTI LOCK) =====
+    safe_save(df_out)
 
     # ===== CHECK CHANGE =====
     old = load_state()
