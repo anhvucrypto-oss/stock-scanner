@@ -4,6 +4,7 @@ from datetime import datetime
 import time
 import os
 
+# ===== FIX PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 LOG = "trades_log.csv"
@@ -12,9 +13,9 @@ FORECAST_FILE = "forecast.csv"
 TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
 CHAT_ID = "1329522024"
 
-LAST_STATE = None
-
 NAV = 100_000_000
+
+LAST_STATE = None
 
 
 # ===== TELEGRAM =====
@@ -26,9 +27,8 @@ def send(msg):
         pass
 
 
-# ===== LOAD FORECAST FULL =====
+# ===== LOAD FORECAST =====
 def load_forecast():
-
     if not os.path.exists(FORECAST_FILE):
         return None
 
@@ -37,11 +37,7 @@ def load_forecast():
     if df.empty:
         return None
 
-    row = df.iloc[0]  # TOP 1
-
-    print("🎯 Forecast:", row["symbol"])
-
-    return row
+    return df.head(3)
 
 
 # ===== GET DATA =====
@@ -95,9 +91,9 @@ def run():
 
     print("\n🚀 RUNNING...")
 
-    forecast = load_forecast()
+    forecast_df = load_forecast()
 
-    if forecast is None:
+    if forecast_df is None:
 
         if LAST_STATE != "NO_FORECAST":
             send("❌ Chưa có forecast → không trade")
@@ -105,44 +101,82 @@ def run():
 
         return
 
-    symbol = forecast["symbol"]
+    results = []
 
-    df = get_data(symbol)
+    best_trade = None
 
-    if df is None:
-        return
+    # ===== DUYỆT 3 MÃ =====
+    for i, row in forecast_df.iterrows():
 
-    if check_entry(df):
+        symbol = row["symbol"]
 
-        entry = forecast["entry"]
-        sl = forecast["sl"]
-        tp = forecast["tp"]
+        df = get_data(symbol)
+        if df is None:
+            continue
 
-        score = forecast["score"]
-        winrate = forecast["winrate"]
+        has_entry = check_entry(df)
 
-        capital = NAV
+        # ===== PHÂN BỔ VỐN =====
+        if i == 0:
+            capital = int(NAV * 0.5)
+        elif i == 1:
+            capital = int(NAV * 0.3)
+        else:
+            capital = int(NAV * 0.2)
 
-        msg = (
-            "🔥 TRADE (FROM FORECAST)\n\n"
-            f"{symbol}\n"
-            f"Entry: {entry}\n"
-            f"SL: {sl} | TP: {tp}\n"
-            f"Score: {score}\n"
-            f"Winrate: {round(winrate*100,1)}%\n"
-            f"Vốn: {capital:,}\n"
+        results.append({
+            "symbol": symbol,
+            "entry": row["entry"],
+            "sl": row["sl"],
+            "tp": row["tp"],
+            "score": row["score"],
+            "winrate": row["winrate"],
+            "capital": capital,
+            "has_entry": has_entry
+        })
+
+        # chọn kèo có entry đầu tiên (tốt nhất)
+        if has_entry and best_trade is None:
+            best_trade = results[-1]
+
+    # ===== SORT: kèo có entry lên đầu =====
+    results = sorted(results, key=lambda x: x["has_entry"], reverse=True)
+
+    # ===== BUILD MESSAGE =====
+    msg = "TOP 3 T+4 PICKS\n\n"
+
+    for r in results:
+
+        msg += (
+            f"{r['symbol']}\n"
+            f"Entry: {r['entry']}\n"
+            f"SL: {r['sl']} | TP: {r['tp']}\n"
+            f"Score: {r['score']}\n"
+            f"Winrate: {round(r['winrate']*100,1)}%\n"
+            f"Vốn: {r['capital']:,}\n"
         )
 
-        send(msg)
-        save(symbol, entry, sl, tp)
+        if r["has_entry"]:
+            msg += "👉 READY\n\n"
+        else:
+            msg += "⏳ WAIT\n\n"
+
+    send(msg)
+
+    # ===== CHỈ TRADE 1 MÃ =====
+    if best_trade:
+
+        save(
+            best_trade["symbol"],
+            best_trade["entry"],
+            best_trade["sl"],
+            best_trade["tp"]
+        )
 
         LAST_STATE = "TRADE"
 
     else:
-
-        if LAST_STATE != "WAIT_ENTRY":
-            send("⏳ Đang chờ điểm vào đẹp (theo forecast)")
-            LAST_STATE = "WAIT_ENTRY"
+        LAST_STATE = "WAIT"
 
 
 # ===== LOOP =====
