@@ -3,35 +3,33 @@ import requests
 from datetime import datetime
 import os
 
-# ===== FIX PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-# ===== CONFIG =====
 FILE = "forecast.csv"
-EQUITY_FILE = "equity_log.csv"
+STATE_FILE = "forecast_state.json"
 
 TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
 CHAT_ID = "1329522024"
 
 NAV = 100_000_000
 
-# ===== TELEGRAM =====
+
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
     except:
         pass
 
-# ===== LOAD SYMBOLS =====
+
 def load_symbols():
     try:
         df = pd.read_csv("symbols.csv")
-        return df["symbol"].dropna().astype(str).tolist()
+        return df["symbol"].dropna().tolist()
     except:
         return []
 
-# ===== GET DATA =====
+
 def get_data(symbol):
     try:
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&resolution=1D&from=1700000000&to=9999999999"
@@ -46,9 +44,8 @@ def get_data(symbol):
     except:
         return None
 
-# ===== SCORE (OPTIMIZED) =====
-def compute_score(df):
 
+def compute_score(df):
     if len(df) < 50:
         return None
 
@@ -57,8 +54,7 @@ def compute_score(df):
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
 
-    trend = ma20.iloc[-1] > ma50.iloc[-1]
-    if not trend:
+    if ma20.iloc[-1] < ma50.iloc[-1]:
         return None
 
     momentum = (close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]
@@ -69,70 +65,48 @@ def compute_score(df):
 
     breakout = close.iloc[-1] > close.iloc[-2]
 
-    # RSI
-    delta = close.diff()
-    gain = delta.clip(lower=0).rolling(14).mean()
-    loss = -delta.clip(upper=0).rolling(14).mean()
-    rs = gain / (loss + 1e-9)
-    rsi = 100 - (100 / (1 + rs))
-    rsi_val = rsi.iloc[-1]
-
-    if rsi_val > 70:
-        return None
-
     vol = df["volume"]
     vol_score = vol.iloc[-1] / (vol.rolling(20).mean().iloc[-1] + 1)
 
-    score = (
-        momentum * 0.4 +
-        (1 if breakout else 0) * 0.2 +
-        min(vol_score, 2) * 0.2 +
-        (1 if trend else 0) * 0.2
-    )
+    score = momentum*0.5 + (1 if breakout else 0)*0.3 + min(vol_score,2)*0.2
 
     return round(score,4)
 
-# ===== BACKTEST =====
-def backtest(df):
 
-    equity = 1.0
-    peak = 1.0
-    max_dd = 0
+def backtest(df):
 
     wins = 0
     total = 0
 
     for i in range(50, len(df)-5):
-
         entry = df["close"].iloc[i]
-        target = entry * 1.04
-        stop = entry * 0.98
+        tp = entry * 1.04
+        sl = entry * 0.98
 
         future = df.iloc[i+1:i+5]
 
-        hit_tp = any(future["high"] >= target)
-        hit_sl = any(future["low"] <= stop)
-
-        if hit_tp:
-            equity *= 1.04
+        if any(future["high"] >= tp):
             wins += 1
-        elif hit_sl:
-            equity *= 0.98
 
         total += 1
 
-        peak = max(peak, equity)
-        dd = (peak - equity) / peak
-        max_dd = max(max_dd, dd)
+    return round(wins/total,3) if total else 0
 
-    winrate = wins / total if total > 0 else 0
 
-    return round(winrate,3), round(max_dd,3), round(equity,2)
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return None
+    try:
+        return pd.read_json(STATE_FILE).to_dict()
+    except:
+        return None
 
-# ===== MAIN =====
+
+def save_state(df):
+    df.to_json(STATE_FILE)
+
+
 def scan():
-
-    print("\n⏰ START:", datetime.now())
 
     symbols = load_symbols()
     results = []
@@ -147,78 +121,70 @@ def scan():
         if score is None:
             continue
 
-        winrate, max_dd, equity = backtest(df)
+        winrate = backtest(df)
 
         entry = df["close"].iloc[-1]
-        sl = entry * 0.98
-        tp = entry * 1.04
 
         results.append({
             "symbol": s,
             "entry": round(entry,1),
-            "sl": round(sl,1),
-            "tp": round(tp,1),
+            "sl": round(entry*0.98,1),
+            "tp": round(entry*1.04,1),
             "score": score,
             "winrate": winrate,
-            "max_dd": max_dd,
-            "equity": equity
+            "time": datetime.now()
         })
 
     df_out = pd.DataFrame(results)
 
+    # ===== KHÔNG BAO GIỜ RỖNG =====
     if df_out.empty:
-        print("❌ No signal")
+        df_out = pd.DataFrame([{
+            "symbol": "NO_SIGNAL",
+            "entry": 0,
+            "sl": 0,
+            "tp": 0,
+            "score": 0,
+            "winrate": 0,
+            "time": datetime.now()
+        }])
+
+    # ===== TOP 3 =====
+    df_out = df_out.sort_values(by=["score","winrate"], ascending=False).head(3)
+
+    # ===== LUÔN GHI FILE =====
+    df_out.to_csv(FILE, index=False)
+
+    # ===== CHECK CHANGE =====
+    old = load_state()
+
+    new = df_out.to_dict()
+
+    if old == new:
+        print("⏸ Không đổi → không gửi Telegram")
         return
 
-    # ===== FILTER EDGE =====
-    df_out = df_out[df_out["winrate"] > 0.55]
-
-    if df_out.empty:
-        print("❌ No strong edge")
-        return
-
-    # ===== RANK =====
-    df_out = df_out.sort_values(by=["score","winrate"], ascending=False)
-
-    top = df_out.head(3).copy()  # TOP 3 ONLY
-    top["time"] = datetime.now()
-
-    top.to_csv(FILE, index=False)
-
-    # ===== SAVE EQUITY =====
-    if os.path.exists(EQUITY_FILE):
-        eq = pd.read_csv(EQUITY_FILE)
-        eq = pd.concat([eq, top], ignore_index=True)
-    else:
-        eq = top
-
-    eq.to_csv(EQUITY_FILE, index=False)
-
-    print("🏆 TOP PICK:")
-    print(top)
+    save_state(df_out)
 
     # ===== TELEGRAM =====
-    row = top.iloc[0]
+    weights = [0.5,0.3,0.2]
 
-    capital = NAV
+    msg = "TOP 3 T+4 PICKS\n\n"
 
-    msg = (
-        "🔥 BEST T+4 PICK\n\n"
-        f"{row['symbol']}\n"
-        f"Entry: {row['entry']}\n"
-        f"SL: {row['sl']} | TP: {row['tp']}\n"
-        f"Score: {row['score']}\n"
-        f"Winrate: {round(row['winrate']*100,1)}%\n"
-        f"Max DD: {round(row['max_dd']*100,1)}%\n"
-        f"Equity: {row['equity']}x\n"
-        f"Vốn: {capital:,}\n"
-    )
+    for i, row in df_out.iterrows():
+        capital = int(NAV * weights[i])
+
+        msg += (
+            f"{row['symbol']}\n"
+            f"Entry: {row['entry']}\n"
+            f"SL: {row['sl']} | TP: {row['tp']}\n"
+            f"Score: {row['score']}\n"
+            f"Winrate: {round(row['winrate']*100,1)}%\n"
+            f"Vốn: {capital:,}\n\n"
+        )
 
     send(msg)
 
-    print("📨 SENT")
 
-
-# ===== RUN =====
 if __name__ == "__main__":
     scan()
