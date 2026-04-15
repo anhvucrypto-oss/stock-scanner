@@ -180,7 +180,7 @@ def scan():
     # ===== RANK =====
     df_out = df_out.sort_values(by=["score","winrate"], ascending=False)
 
-    top = df_out.head(1).copy()  # TOP 1 ONLY
+    top = df_out.head(3).copy()  # TOP 3 ONLY
     top["time"] = datetime.now()
 
     top.to_csv(FILE, index=False)
