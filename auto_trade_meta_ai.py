@@ -3,19 +3,19 @@ import requests
 from datetime import datetime
 import time
 import os
+import json
 
 # ===== FIX PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 LOG = "trades_log.csv"
 FORECAST_FILE = "forecast.csv"
+STATE_FILE = "bot_state.json"
 
 TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
 CHAT_ID = "1329522024"
 
 NAV = 100_000_000
-
-LAST_STATE = None
 
 
 # ===== TELEGRAM =====
@@ -40,6 +40,23 @@ def load_forecast():
     return df.head(3)
 
 
+# ===== LOAD STATE =====
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return None
+    try:
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return None
+
+
+# ===== SAVE STATE =====
+def save_state(state):
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
+
+
 # ===== GET DATA =====
 def get_data(symbol):
     try:
@@ -55,7 +72,6 @@ def get_data(symbol):
 
 # ===== ENTRY =====
 def check_entry(df):
-
     if len(df) < 20:
         return False
 
@@ -64,8 +80,8 @@ def check_entry(df):
     return df["close"].iloc[-1] > ma20.iloc[-1]
 
 
-# ===== SAVE =====
-def save(symbol, entry, sl, tp):
+# ===== SAVE TRADE =====
+def save_trade(symbol, entry, sl, tp):
 
     new = pd.DataFrame([{
         "time": datetime.now(),
@@ -84,28 +100,30 @@ def save(symbol, entry, sl, tp):
     df.to_csv(LOG, index=False)
 
 
+# ===== BUILD STATE =====
+def build_state(results):
+    return [
+        {
+            "symbol": r["symbol"],
+            "has_entry": r["has_entry"]
+        }
+        for r in results
+    ]
+
+
 # ===== MAIN =====
 def run():
-
-    global LAST_STATE
 
     print("\n🚀 RUNNING...")
 
     forecast_df = load_forecast()
-
     if forecast_df is None:
-
-        if LAST_STATE != "NO_FORECAST":
-            send("❌ Chưa có forecast → không trade")
-            LAST_STATE = "NO_FORECAST"
-
         return
 
     results = []
 
     best_trade = None
 
-    # ===== DUYỆT 3 MÃ =====
     for i, row in forecast_df.iterrows():
 
         symbol = row["symbol"]
@@ -116,7 +134,6 @@ def run():
 
         has_entry = check_entry(df)
 
-        # ===== PHÂN BỔ VỐN =====
         if i == 0:
             capital = int(NAV * 0.5)
         elif i == 1:
@@ -135,12 +152,22 @@ def run():
             "has_entry": has_entry
         })
 
-        # chọn kèo có entry đầu tiên (tốt nhất)
         if has_entry and best_trade is None:
             best_trade = results[-1]
 
-    # ===== SORT: kèo có entry lên đầu =====
+    # ===== SORT =====
     results = sorted(results, key=lambda x: x["has_entry"], reverse=True)
+
+    # ===== CHECK STATE CHANGE =====
+    new_state = build_state(results)
+    old_state = load_state()
+
+    if new_state == old_state:
+        print("⏸ Không có thay đổi → không gửi")
+        return
+
+    # ===== SAVE STATE =====
+    save_state(new_state)
 
     # ===== BUILD MESSAGE =====
     msg = "TOP 3 T+4 PICKS\n\n"
@@ -156,27 +183,18 @@ def run():
             f"Vốn: {r['capital']:,}\n"
         )
 
-        if r["has_entry"]:
-            msg += "👉 READY\n\n"
-        else:
-            msg += "⏳ WAIT\n\n"
+        msg += "👉 READY\n\n" if r["has_entry"] else "⏳ WAIT\n\n"
 
     send(msg)
 
-    # ===== CHỈ TRADE 1 MÃ =====
+    # ===== TRADE =====
     if best_trade:
-
-        save(
+        save_trade(
             best_trade["symbol"],
             best_trade["entry"],
             best_trade["sl"],
             best_trade["tp"]
         )
-
-        LAST_STATE = "TRADE"
-
-    else:
-        LAST_STATE = "WAIT"
 
 
 # ===== LOOP =====
