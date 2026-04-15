@@ -89,7 +89,6 @@ def backtest(df):
 
         entry = df["close"].iloc[i]
         tp = entry * 1.04
-        sl = entry * 0.98
 
         future = df.iloc[i+1:i+5]
 
@@ -112,10 +111,11 @@ def load_state():
 
 
 def save_state(df):
+    df = df.drop(columns=["time"], errors="ignore")  # ❗ FIX spam
     df.to_json(STATE_FILE, date_format="iso")
 
 
-# ===== SAFE SAVE (ANTI-LOCK) =====
+# ===== SAFE SAVE =====
 def safe_save(df):
 
     temp_file = "forecast_temp.csv"
@@ -186,15 +186,14 @@ def scan():
     # ===== TOP 3 =====
     df_out = df_out.sort_values(by=["score","winrate"], ascending=False).head(3)
 
-    # ===== RESET INDEX =====
     df_out = df_out.reset_index(drop=True)
 
-    # ===== SAVE FILE (ANTI LOCK) =====
+    # ===== LUÔN SAVE FILE =====
     safe_save(df_out)
 
-    # ===== CHECK CHANGE =====
+    # ===== CHECK CHANGE (FIX TRÙNG TELE) =====
     old = load_state()
-    new = df_out.to_dict()
+    new = df_out.drop(columns=["time"], errors="ignore").to_dict()
 
     if old == new:
         print("⏸ Không đổi → không gửi Telegram")
