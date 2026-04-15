@@ -1,63 +1,81 @@
-import subprocess
 import time
 from datetime import datetime
 import threading
+import sys
+import os
 
-print("🚀 START FULL SYSTEM")
-print("👉 Bấm Ctrl + C hoặc Enter để dừng toàn bộ tiến trình\n")
+# ===== IMPORT MODULE =====
+import forecast_scan
+import auto_trade_meta_ai
 
-# ===== START BOT =====
-bot = subprocess.Popen(["python", "auto_trade_meta_ai.py"])
+running = True
 
-# ===== START DASHBOARD =====
-dashboard = subprocess.Popen(["python", "-m", "streamlit", "run", "dashboard.py"])
 
-# ===== STOP FLAG =====
-stop_flag = False
-
-# ===== ENTER LISTENER =====
-def wait_for_enter():
-    global stop_flag
+# ===== STOP HANDLER =====
+def stop_listener():
+    global running
     input()
-    stop_flag = True
+    print("\n⛔ Dừng hệ thống...")
+    running = False
 
-threading.Thread(target=wait_for_enter, daemon=True).start()
 
-# ===== TIME CONTROL =====
-last_run = None
+# ===== CHECK TIME WINDOW =====
+def in_trading_time():
 
-def is_weekday():
-    return datetime.now().weekday() < 5
-
-def is_target_time():
     now = datetime.now()
-    return (
-        (now.hour == 12 and now.minute < 2) or
-        (now.hour == 15 and now.minute < 2)
-    )
+    h = now.hour
+    m = now.minute
+
+    # 12:00 → 12:05
+    if h == 12 and m <= 5:
+        return True
+
+    # 13:00 → 15:05
+    if (h == 13) or (h == 14) or (h == 15 and m <= 5):
+        return True
+
+    return False
+
 
 # ===== MAIN LOOP =====
-try:
-    while not stop_flag:
+def run():
 
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    global running
 
-        if is_weekday() and is_target_time():
+    print("🚀 SYSTEM START")
+    print("👉 Bấm Enter để dừng")
 
-            if last_run != now:
-                print(f"⏰ RUN FORECAST {now}")
-                subprocess.Popen(["python", "forecast_scan.py"])
-                last_run = now
+    # thread nghe stop
+    threading.Thread(target=stop_listener, daemon=True).start()
 
-        time.sleep(30)
+    while running:
 
-except KeyboardInterrupt:
-    pass
+        now = datetime.now()
 
-# ===== STOP ALL =====
-print("\n🛑 STOPPING SYSTEM...")
+        # ===== STOP SAU 15:05 =====
+        if now.hour == 15 and now.minute > 5:
+            print("🛑 Hết giờ → dừng hệ thống")
+            break
 
-bot.terminate()
-dashboard.terminate()
+        if in_trading_time():
 
-print("✅ Đã dừng toàn bộ.")
+            print(f"\n⏰ RUN @ {now.strftime('%H:%M:%S')}")
+
+            try:
+                forecast_scan.scan()
+                auto_trade_meta_ai.run()
+            except Exception as e:
+                print("❌ Lỗi:", e)
+
+            time.sleep(60)  # chạy mỗi phút
+
+        else:
+            # ngoài giờ → ngủ nhẹ
+            time.sleep(10)
+
+    print("✅ SYSTEM STOPPED")
+
+
+# ===== RUN =====
+if __name__ == "__main__":
+    run()
