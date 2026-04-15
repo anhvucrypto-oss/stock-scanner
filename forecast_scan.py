@@ -3,14 +3,14 @@ import requests
 from datetime import datetime
 import os
 
-# ===== FIX PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-# ===== CONFIG =====
 FILE = "forecast.csv"
 
 TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
 CHAT_ID = "1329522024"
+
+NAV = 100_000_000  # vốn
 
 # ===== TELEGRAM =====
 def send(msg):
@@ -20,7 +20,7 @@ def send(msg):
     except:
         pass
 
-# ===== LOAD SYMBOLS =====
+# ===== LOAD SYMBOL =====
 def load_symbols():
     try:
         df = pd.read_csv("symbols.csv")
@@ -28,141 +28,128 @@ def load_symbols():
     except:
         return []
 
-# ===== GET DATA =====
+# ===== DATA =====
 def get_data(symbol):
     try:
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&resolution=1D&from=1700000000&to=9999999999"
-        data = requests.get(url, timeout=10).json()
-
-        if "c" not in data:
-            return None
+        data = requests.get(url).json()
 
         return pd.DataFrame({
             "close": data["c"],
             "high": data["h"],
-            "low": data["l"],
-            "volume": data.get("v", [0]*len(data["c"]))
+            "low": data["l"]
         })
-
     except:
         return None
 
-# ===== INDICATORS =====
+# ===== SCORE =====
 def compute_score(df):
-
     if len(df) < 30:
         return None
 
     close = df["close"]
 
-    # ===== MOMENTUM =====
     momentum = (close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]
-
-    # ===== BREAKOUT =====
     breakout = close.iloc[-1] > close.rolling(20).max().iloc[-2]
 
-    # ===== VOLUME =====
-    vol = df["volume"]
-    vol_score = vol.iloc[-1] / (vol.rolling(20).mean().iloc[-1] + 1)
+    score = momentum + (0.3 if breakout else 0)
 
-    # ===== RSI =====
-    delta = close.diff()
-    gain = delta.clip(lower=0).rolling(14).mean()
-    loss = -delta.clip(upper=0).rolling(14).mean()
-    rs = gain / (loss + 1e-9)
-    rsi = 100 - (100 / (1 + rs))
+    return score, momentum
 
-    rsi_val = rsi.iloc[-1]
+# ===== BACKTEST T+4 =====
+def backtest(df):
 
-    # ===== FILTER =====
-    if rsi_val > 75:   # quá mua → bỏ
-        return None
+    wins = 0
+    total = 0
 
-    # ===== SCORE COMBINE =====
-    score = (
-        momentum * 0.5 +
-        (1 if breakout else 0) * 0.3 +
-        min(vol_score, 2) * 0.2
-    )
+    for i in range(30, len(df)-5):
 
-    return round(score, 4), round(momentum,4), breakout, round(vol_score,2), round(rsi_val,1)
+        entry = df["close"].iloc[i]
+        target = entry * 1.05
+        stop = entry * 0.97
+
+        future = df.iloc[i+1:i+5]
+
+        hit_tp = any(future["high"] >= target)
+        hit_sl = any(future["low"] <= stop)
+
+        if hit_tp:
+            wins += 1
+
+        total += 1
+
+    if total == 0:
+        return 0
+
+    return round(wins / total, 2)
 
 # ===== MAIN =====
 def scan():
 
-    print("\n⏰ START AI FORECAST:", datetime.now())
-
     symbols = load_symbols()
-
-    if not symbols:
-        print("❌ No symbols")
-        return
 
     results = []
 
     for s in symbols:
 
         df = get_data(s)
-
         if df is None:
             continue
 
         res = compute_score(df)
-
         if res is None:
             continue
 
-        score, momentum, breakout, vol_score, rsi = res
+        score, momentum = res
 
-        entry = round(df["close"].iloc[-1],1)
-        target = round(entry * 1.06,1)
+        winrate = backtest(df)
+
+        entry = df["close"].iloc[-1]
+        sl = entry * 0.97
+        tp = entry * 1.05
 
         results.append({
             "symbol": s,
-            "entry": entry,
-            "target_T4": target,
-            "score": score,
-            "momentum": momentum,
-            "breakout": breakout,
-            "volume": vol_score,
-            "rsi": rsi
+            "entry": round(entry,1),
+            "sl": round(sl,1),
+            "tp": round(tp,1),
+            "score": round(score,3),
+            "winrate": winrate
         })
 
     df_out = pd.DataFrame(results)
 
     if df_out.empty:
-        print("❌ No signal")
         return
 
     # ===== RANK =====
-    df_out = df_out.sort_values(by="score", ascending=False)
+    df_out = df_out.sort_values(by=["score","winrate"], ascending=False)
 
     top = df_out.head(3)
-    top["time"] = datetime.now()
 
-    top.to_csv(FILE, index=False)
+    # ===== NAV ALLOCATION =====
+    weights = [0.5, 0.3, 0.2]
 
-    print("🏆 TOP PICKS:")
-    print(top)
+    msg = "🔥 TOP 3 T+4 PICKS\n\n"
 
-    # ===== TELEGRAM =====
-    msg = "🔥 TOP 3 T+4 STRONGEST\n\n"
+    for i, (_, row) in enumerate(top.iterrows()):
 
-    for _, row in top.iterrows():
+        capital = NAV * weights[i]
+
         msg += (
             f"{row['symbol']}\n"
+            f"Entry: {row['entry']}\n"
+            f"SL: {row['sl']} | TP: {row['tp']}\n"
             f"Score: {row['score']}\n"
-            f"Momentum: {row['momentum']}\n"
-            f"Volume: {row['volume']}\n"
-            f"RSI: {row['rsi']}\n"
-            f"Target: {row['target_T4']}\n\n"
+            f"Winrate: {row['winrate']*100}%\n"
+            f"Vốn: {int(capital):,}\n\n"
         )
+
+    top["time"] = datetime.now()
+    top.to_csv(FILE, index=False)
 
     send(msg)
 
-    print("📨 Sent Telegram")
 
-
-# ===== RUN =====
 if __name__ == "__main__":
     scan()
