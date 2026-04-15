@@ -34,16 +34,16 @@ if os.path.exists("trades_log.csv"):
             st.warning("Trades log rỗng")
 
     except Exception as e:
-        st.error(f"Lỗi đọc trades_log.csv: {e}")
+        st.error(f"Lỗi trades_log.csv: {e}")
 
 else:
     st.warning("Chưa có trades_log.csv")
 
 
 # ==============================
-# 📊 FORECAST
+# 📊 FORECAST TOP 3
 # ==============================
-st.subheader("📊 Forecast (TOP PICK)")
+st.subheader("📊 TOP 3 T+4 PICKS")
 
 if os.path.exists("forecast.csv"):
 
@@ -52,39 +52,40 @@ if os.path.exists("forecast.csv"):
 
         if not df_f.empty:
 
-            # đảm bảo có time
             if "time" in df_f.columns:
                 df_f["time"] = pd.to_datetime(df_f["time"], errors="coerce")
                 df_f = df_f.sort_values(by="time", ascending=False)
 
-            # hiển thị top 1
-            row = df_f.iloc[0]
+            # ===== HIỂN THỊ 3 KÈO =====
+            for i, row in df_f.head(3).iterrows():
 
-            st.markdown("### 🔥 Best Pick")
+                st.markdown(f"### 🔥 {row['symbol']}")
 
-            col1, col2, col3 = st.columns(3)
+                col1, col2, col3 = st.columns(3)
 
-            col1.metric("Symbol", row.get("symbol", "-"))
-            col2.metric("Entry", row.get("entry", "-"))
-            col3.metric("Score", row.get("score", "-"))
+                col1.metric("Entry", row.get("entry", "-"))
+                col2.metric("SL", row.get("sl", "-"))
+                col3.metric("TP", row.get("tp", "-"))
 
-            col1, col2, col3 = st.columns(3)
+                col1, col2, col3 = st.columns(3)
 
-            col1.metric("SL", row.get("sl", "-"))
-            col2.metric("TP", row.get("tp", "-"))
-            col3.metric("Winrate", f"{round(row.get('winrate',0)*100,1)}%")
+                col1.metric("Score", row.get("score", "-"))
+                col2.metric("Winrate", f"{round(row.get('winrate',0)*100,1)}%")
+                col3.metric("Vốn", f"{int(100_000_000 * [0.5,0.3,0.2][i]):,}")
 
-            if "max_dd" in row:
-                st.metric("Max Drawdown", f"{round(row['max_dd']*100,1)}%")
+                if "max_dd" in row:
+                    st.write(f"Max DD: {round(row['max_dd']*100,1)}%")
 
-            if "equity" in row:
-                st.metric("Equity", f"{row['equity']}x")
+                if "equity" in row:
+                    st.write(f"Equity: {row['equity']}x")
+
+                st.markdown("---")
 
         else:
             st.warning("Forecast rỗng")
 
     except Exception as e:
-        st.error(f"Lỗi đọc forecast.csv: {e}")
+        st.error(f"Lỗi forecast.csv: {e}")
 
 else:
     st.warning("Chưa có forecast.csv")
