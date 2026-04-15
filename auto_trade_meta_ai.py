@@ -53,8 +53,11 @@ def load_state():
 
 # ===== SAVE STATE =====
 def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print("❌ Lỗi save state:", e)
 
 
 # ===== GET DATA =====
@@ -72,12 +75,13 @@ def get_data(symbol):
 
 # ===== ENTRY =====
 def check_entry(df):
+
     if len(df) < 20:
         return False
 
     ma20 = df["close"].rolling(20).mean()
 
-    return df["close"].iloc[-1] > ma20.iloc[-1]
+    return bool(df["close"].iloc[-1] > ma20.iloc[-1])  # ép bool chuẩn
 
 
 # ===== SAVE TRADE =====
@@ -100,12 +104,12 @@ def save_trade(symbol, entry, sl, tp):
     df.to_csv(LOG, index=False)
 
 
-# ===== BUILD STATE =====
+# ===== BUILD STATE (FIX JSON) =====
 def build_state(results):
     return [
         {
-            "symbol": r["symbol"],
-            "has_entry": r["has_entry"]
+            "symbol": str(r["symbol"]),
+            "has_entry": bool(r["has_entry"])
         }
         for r in results
     ]
@@ -114,19 +118,20 @@ def build_state(results):
 # ===== MAIN =====
 def run():
 
-    print("\n🚀 RUNNING...")
+    print("\n🚀 RUNNING BOT...")
 
     forecast_df = load_forecast()
+
     if forecast_df is None:
+        print("❌ Không có forecast")
         return
 
     results = []
-
     best_trade = None
 
     for i, row in forecast_df.iterrows():
 
-        symbol = row["symbol"]
+        symbol = str(row["symbol"])
 
         df = get_data(symbol)
         if df is None:
@@ -134,6 +139,7 @@ def run():
 
         has_entry = check_entry(df)
 
+        # ===== PHÂN BỔ VỐN =====
         if i == 0:
             capital = int(NAV * 0.5)
         elif i == 1:
@@ -143,11 +149,11 @@ def run():
 
         results.append({
             "symbol": symbol,
-            "entry": row["entry"],
-            "sl": row["sl"],
-            "tp": row["tp"],
-            "score": row["score"],
-            "winrate": row["winrate"],
+            "entry": float(row["entry"]),
+            "sl": float(row["sl"]),
+            "tp": float(row["tp"]),
+            "score": float(row["score"]),
+            "winrate": float(row["winrate"]),
             "capital": capital,
             "has_entry": has_entry
         })
@@ -155,21 +161,20 @@ def run():
         if has_entry and best_trade is None:
             best_trade = results[-1]
 
-    # ===== SORT =====
+    # ===== SORT READY LÊN TRÊN =====
     results = sorted(results, key=lambda x: x["has_entry"], reverse=True)
 
-    # ===== CHECK STATE CHANGE =====
+    # ===== STATE CHECK =====
     new_state = build_state(results)
     old_state = load_state()
 
     if new_state == old_state:
-        print("⏸ Không có thay đổi → không gửi")
+        print("⏸ Không đổi → không gửi")
         return
 
-    # ===== SAVE STATE =====
     save_state(new_state)
 
-    # ===== BUILD MESSAGE =====
+    # ===== TELEGRAM =====
     msg = "TOP 3 T+4 PICKS\n\n"
 
     for r in results:
@@ -187,7 +192,7 @@ def run():
 
     send(msg)
 
-    # ===== TRADE =====
+    # ===== SAVE TRADE (CHỈ 1 MÃ) =====
     if best_trade:
         save_trade(
             best_trade["symbol"],
@@ -197,7 +202,6 @@ def run():
         )
 
 
-# ===== LOOP =====
-while True:
+# ===== CHẠY RIÊNG (KHÔNG AUTO KHI IMPORT) =====
+if __name__ == "__main__":
     run()
-    time.sleep(60)
