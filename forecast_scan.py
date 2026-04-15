@@ -3,6 +3,9 @@ import requests
 from datetime import datetime
 import os
 
+# ===== FIX PATH (QUAN TRỌNG) =====
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 # ===== CONFIG =====
 FILE = "forecast.csv"
 
@@ -14,34 +17,35 @@ def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    except:
-        pass
+    except Exception as e:
+        print("❌ Telegram lỗi:", e)
 
 # ===== LOAD SYMBOLS =====
 def load_symbols():
     try:
-        url = "https://raw.githubusercontent.com/anhvucrypto-oss/stock-scanner/main/symbols.csv"
+        if not os.path.exists("symbols.csv"):
+            print("❌ Không tìm thấy symbols.csv")
+            return []
 
-        df = pd.read_csv(url)
+        df = pd.read_csv("symbols.csv")
 
-        symbols = df["symbol"].dropna().tolist()
+        if "symbol" not in df.columns:
+            print("❌ symbols.csv thiếu cột 'symbol'")
+            return []
 
-        print("🌐 Load symbols từ GitHub")
-        print("📊 Symbols:", symbols)
+        symbols = df["symbol"].dropna().astype(str).tolist()
+
+        if len(symbols) == 0:
+            print("❌ symbols.csv rỗng")
+        else:
+            print("📊 Loaded symbols:", symbols)
+            print("📊 Tổng số mã:", len(symbols))
 
         return symbols
 
     except Exception as e:
-        print("❌ Lỗi load GitHub:", e)
-
-        # fallback local
-        try:
-            df = pd.read_csv("symbols.csv")
-            symbols = df["symbol"].dropna().tolist()
-            print("📁 Fallback local symbols")
-            return symbols
-        except:
-            return []
+        print("❌ Lỗi load symbols:", e)
+        return []
 
 # ===== GET DATA =====
 def get_data(symbol):
@@ -58,7 +62,8 @@ def get_data(symbol):
             "low": data["l"]
         })
 
-    except:
+    except Exception as e:
+        print(f"❌ {symbol} lỗi API:", e)
         return None
 
 # ===== SIGNAL =====
@@ -69,12 +74,16 @@ def signal(df):
     ma20 = df["close"].rolling(20).mean()
     return df["close"].iloc[-1] > ma20.iloc[-1]
 
-# ===== MAIN SCAN =====
+# ===== MAIN =====
 def scan():
 
     print("\n⏰ START FORECAST:", datetime.now())
 
     symbols = load_symbols()
+
+    if len(symbols) == 0:
+        print("❌ KHÔNG CÓ SYMBOL → DỪNG")
+        return
 
     results = []
 
