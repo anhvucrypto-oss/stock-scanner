@@ -1,112 +1,70 @@
-import requests
 import pandas as pd
-import numpy as np
+import requests
 from datetime import datetime
 import time
 import os
-import base64
 
-print("🚀 HEDGE FUND SYSTEM START")
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-# ===== CONFIG =====
+LOG = "trades_log.csv"
+FORECAST_FILE = "forecast.csv"
+
 TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
 CHAT_ID = "1329522024"
 
-REPO = "anhvucrypto-oss/stock-scanner"
-FILE_PATH = "trades_log.csv"
 LAST_STATE = None
 
-# ===== INIT FILE =====
-if not os.path.exists("trades_log.csv"):
-    pd.DataFrame(columns=["time","symbol","entry","sl","tp","result"]).to_csv("trades_log.csv",index=False)
 
 # ===== TELEGRAM =====
 def send(msg):
     try:
-        print("📨", msg)
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
     except:
         pass
 
-# ===== PUSH GITHUB =====
-def push():
-    token = os.getenv("GITHUB_TOKEN")
-    if not token:
-        print("❌ No token")
-        return
 
-    try:
-        with open("trades_log.csv","r",encoding="utf-8") as f:
-            content = f.read()
+# ===== LOAD FORECAST =====
+def load_forecast():
 
-        encoded = base64.b64encode(content.encode()).decode()
+    if not os.path.exists(FORECAST_FILE):
+        return []
 
-        url = f"https://api.github.com/repos/{REPO}/contents/{FILE_PATH}"
+    df = pd.read_csv(FORECAST_FILE)
 
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json"
-        }
+    if df.empty or "symbol" not in df.columns:
+        return []
 
-        res = requests.get(url, headers=headers)
-        sha = res.json()["sha"] if res.status_code == 200 else None
+    symbols = df["symbol"].dropna().tolist()
 
-        data = {"message":"update","content":encoded}
-        if sha:
-            data["sha"] = sha
+    print("🎯 Forecast symbols:", symbols)
 
-        res = requests.put(url, json=data, headers=headers)
-        print("📡 GitHub:", res.status_code)
+    return symbols
 
-    except Exception as e:
-        print("❌ push error:", e)
 
-# ===== DATA =====
+# ===== GET DATA =====
 def get_data(symbol):
     try:
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&resolution=1D&from=1700000000&to=9999999999"
         data = requests.get(url).json()
 
-        if "c" not in data:
-            return None
-
         return pd.DataFrame({
-            "close": data["c"],
-            "high": data["h"],
-            "low": data["l"]
+            "close": data["c"]
         })
     except:
         return None
 
-# ===== MARKET FILTER =====
-def market_ok():
-    df = get_data("VNINDEX")
-    if df is None or len(df) < 50:
+
+# ===== SIMPLE ENTRY =====
+def check_entry(df):
+
+    if len(df) < 25:
         return False
 
-    df["ma50"] = df["close"].rolling(50).mean()
-    return df["close"].iloc[-1] > df["ma50"].iloc[-1]
+    ma20 = df["close"].rolling(20).mean()
 
-# ===== SIGNAL =====
-symbols = ["FPT","VNM","ACB","DGC","REE"]
+    return df["close"].iloc[-1] > ma20.iloc[-1]
 
-def find_trade():
-
-    for s in symbols:
-        df = get_data(s)
-        if df is None:
-            continue
-
-        ma20 = df["close"].rolling(20).mean()
-
-        if df["close"].iloc[-1] > ma20.iloc[-1]:
-            entry = round(df["close"].iloc[-1],1)
-            sl = round(entry*0.97,1)
-            tp = round(entry*1.06,1)
-            return s, entry, sl, tp
-
-    return None
 
 # ===== SAVE =====
 def save(symbol, entry, sl, tp):
@@ -116,82 +74,70 @@ def save(symbol, entry, sl, tp):
         "symbol": symbol,
         "entry": entry,
         "sl": sl,
-        "tp": tp,
-        "result": 0
+        "tp": tp
     }])
 
-    df = pd.read_csv("trades_log.csv")
-    df = pd.concat([df, new], ignore_index=True)
-    df.to_csv("trades_log.csv", index=False)
+    if os.path.exists(LOG):
+        df = pd.read_csv(LOG)
+        df = pd.concat([df, new], ignore_index=True)
+    else:
+        df = new
 
-# ===== NO TRADE LOG =====
-def log_no_trade():
+    df.to_csv(LOG, index=False)
 
-    new = pd.DataFrame([{
-        "time": datetime.now(),
-        "symbol": "NO_TRADE",
-        "entry": 0,
-        "sl": 0,
-        "tp": 0,
-        "result": 0
-    }])
 
-    df = pd.read_csv("trades_log.csv")
-    df = pd.concat([df, new], ignore_index=True)
-    df.to_csv("trades_log.csv", index=False)
-
-# ===== RUN =====
+# ===== MAIN =====
 def run():
+
     global LAST_STATE
 
     print("\n🚀 RUNNING...")
 
-    # MARKET XẤU
-    if not market_ok():
+    forecast_symbols = load_forecast()
 
-        if LAST_STATE != "NO_TRADE":
-            msg = "❌ Thị trường xấu, NO TRADE, sẽ báo khi có tín hiệu TRADE"
-            send(msg)
-            LAST_STATE = "NO_TRADE"
+    if not forecast_symbols:
 
-        save("NO_TRADE", 0, 0, 0)
+        if LAST_STATE != "NO_FORECAST":
+            send("❌ Chưa có forecast → không trade")
+            LAST_STATE = "NO_FORECAST"
+
         return
 
-    # TÌM KÈO
-    trade = find_trade()
+    for symbol in forecast_symbols:
 
-    if trade is None:
+        df = get_data(symbol)
 
-        if LAST_STATE != "NO_TRADE":
-            msg = "❌ Không có setup, NO TRADE"
-            send(msg)
-            LAST_STATE = "NO_TRADE"
+        if df is None:
+            continue
 
-        save("NO_TRADE", 0, 0, 0)
-        return
+        if check_entry(df):
 
-    # CÓ TRADE
-    symbol, entry, sl, tp = trade
+            entry = df["close"].iloc[-1]
+            sl = entry * 0.97
+            tp = entry * 1.05
 
-    msg = f"""
-🔥 TRADE
+            msg = f"""
+🔥 TRADE (FROM FORECAST)
 
 {symbol}
-Entry: {entry}
-SL: {sl}
-TP: {tp}
+Entry: {round(entry,1)}
+SL: {round(sl,1)}
+TP: {round(tp,1)}
 """
 
-    send(msg)
-    LAST_STATE = "TRADE"
+            send(msg)
+            save(symbol, entry, sl, tp)
 
-    save(symbol, entry, sl, tp)
+            LAST_STATE = "TRADE"
+            return
+
+    # ===== NO TRADE =====
+    if LAST_STATE != "NO_TRADE":
+        send("❌ Forecast có nhưng chưa đạt điểm vào")
+        LAST_STATE = "NO_TRADE"
+
 
 # ===== LOOP =====
 while True:
     run()
-    push()
     time.sleep(60)
-
-
-    
