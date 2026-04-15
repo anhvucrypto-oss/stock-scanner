@@ -3,14 +3,17 @@ import requests
 from datetime import datetime
 import os
 
+# ===== FIX PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+# ===== CONFIG =====
 FILE = "forecast.csv"
+EQUITY_FILE = "equity_log.csv"
 
 TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
 CHAT_ID = "1329522024"
 
-NAV = 100_000_000  # vốn
+NAV = 100_000_000
 
 # ===== TELEGRAM =====
 def send(msg):
@@ -20,7 +23,7 @@ def send(msg):
     except:
         pass
 
-# ===== LOAD SYMBOL =====
+# ===== LOAD SYMBOLS =====
 def load_symbols():
     try:
         df = pd.read_csv("symbols.csv")
@@ -28,7 +31,7 @@ def load_symbols():
     except:
         return []
 
-# ===== DATA =====
+# ===== GET DATA =====
 def get_data(symbol):
     try:
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&resolution=1D&from=1700000000&to=9999999999"
@@ -37,36 +40,73 @@ def get_data(symbol):
         return pd.DataFrame({
             "close": data["c"],
             "high": data["h"],
-            "low": data["l"]
+            "low": data["l"],
+            "volume": data.get("v", [0]*len(data["c"]))
         })
     except:
         return None
 
-# ===== SCORE =====
+# ===== SCORE (OPTIMIZED) =====
 def compute_score(df):
-    if len(df) < 30:
+
+    if len(df) < 50:
         return None
 
     close = df["close"]
 
+    ma20 = close.rolling(20).mean()
+    ma50 = close.rolling(50).mean()
+
+    trend = ma20.iloc[-1] > ma50.iloc[-1]
+    if not trend:
+        return None
+
     momentum = (close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]
-    breakout = close.iloc[-1] > close.rolling(20).max().iloc[-2]
 
-    score = momentum + (0.3 if breakout else 0)
+    pullback = close.iloc[-1] < close.rolling(10).max().iloc[-1] * 0.98
+    if not pullback:
+        return None
 
-    return score, momentum
+    breakout = close.iloc[-1] > close.iloc[-2]
 
-# ===== BACKTEST T+4 =====
+    # RSI
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = -delta.clip(upper=0).rolling(14).mean()
+    rs = gain / (loss + 1e-9)
+    rsi = 100 - (100 / (1 + rs))
+    rsi_val = rsi.iloc[-1]
+
+    if rsi_val > 70:
+        return None
+
+    vol = df["volume"]
+    vol_score = vol.iloc[-1] / (vol.rolling(20).mean().iloc[-1] + 1)
+
+    score = (
+        momentum * 0.4 +
+        (1 if breakout else 0) * 0.2 +
+        min(vol_score, 2) * 0.2 +
+        (1 if trend else 0) * 0.2
+    )
+
+    return round(score,4)
+
+# ===== BACKTEST =====
 def backtest(df):
+
+    equity = 1.0
+    peak = 1.0
+    max_dd = 0
 
     wins = 0
     total = 0
 
-    for i in range(30, len(df)-5):
+    for i in range(50, len(df)-5):
 
         entry = df["close"].iloc[i]
-        target = entry * 1.05
-        stop = entry * 0.97
+        target = entry * 1.04
+        stop = entry * 0.98
 
         future = df.iloc[i+1:i+5]
 
@@ -74,20 +114,27 @@ def backtest(df):
         hit_sl = any(future["low"] <= stop)
 
         if hit_tp:
+            equity *= 1.04
             wins += 1
+        elif hit_sl:
+            equity *= 0.98
 
         total += 1
 
-    if total == 0:
-        return 0
+        peak = max(peak, equity)
+        dd = (peak - equity) / peak
+        max_dd = max(max_dd, dd)
 
-    return round(wins / total, 2)
+    winrate = wins / total if total > 0 else 0
+
+    return round(winrate,3), round(max_dd,3), round(equity,2)
 
 # ===== MAIN =====
 def scan():
 
-    symbols = load_symbols()
+    print("\n⏰ START:", datetime.now())
 
+    symbols = load_symbols()
     results = []
 
     for s in symbols:
@@ -96,60 +143,82 @@ def scan():
         if df is None:
             continue
 
-        res = compute_score(df)
-        if res is None:
+        score = compute_score(df)
+        if score is None:
             continue
 
-        score, momentum = res
-
-        winrate = backtest(df)
+        winrate, max_dd, equity = backtest(df)
 
         entry = df["close"].iloc[-1]
-        sl = entry * 0.97
-        tp = entry * 1.05
+        sl = entry * 0.98
+        tp = entry * 1.04
 
         results.append({
             "symbol": s,
             "entry": round(entry,1),
             "sl": round(sl,1),
             "tp": round(tp,1),
-            "score": round(score,3),
-            "winrate": winrate
+            "score": score,
+            "winrate": winrate,
+            "max_dd": max_dd,
+            "equity": equity
         })
 
     df_out = pd.DataFrame(results)
 
     if df_out.empty:
+        print("❌ No signal")
+        return
+
+    # ===== FILTER EDGE =====
+    df_out = df_out[df_out["winrate"] > 0.55]
+
+    if df_out.empty:
+        print("❌ No strong edge")
         return
 
     # ===== RANK =====
     df_out = df_out.sort_values(by=["score","winrate"], ascending=False)
 
-    top = df_out.head(3)
-
-    # ===== NAV ALLOCATION =====
-    weights = [0.5, 0.3, 0.2]
-
-    msg = "🔥 TOP 3 T+4 PICKS\n\n"
-
-    for i, (_, row) in enumerate(top.iterrows()):
-
-        capital = NAV * weights[i]
-
-        msg += (
-            f"{row['symbol']}\n"
-            f"Entry: {row['entry']}\n"
-            f"SL: {row['sl']} | TP: {row['tp']}\n"
-            f"Score: {row['score']}\n"
-            f"Winrate: {row['winrate']*100}%\n"
-            f"Vốn: {int(capital):,}\n\n"
-        )
-
+    top = df_out.head(1).copy()  # TOP 1 ONLY
     top["time"] = datetime.now()
+
     top.to_csv(FILE, index=False)
+
+    # ===== SAVE EQUITY =====
+    if os.path.exists(EQUITY_FILE):
+        eq = pd.read_csv(EQUITY_FILE)
+        eq = pd.concat([eq, top], ignore_index=True)
+    else:
+        eq = top
+
+    eq.to_csv(EQUITY_FILE, index=False)
+
+    print("🏆 TOP PICK:")
+    print(top)
+
+    # ===== TELEGRAM =====
+    row = top.iloc[0]
+
+    capital = NAV
+
+    msg = (
+        "🔥 BEST T+4 PICK\n\n"
+        f"{row['symbol']}\n"
+        f"Entry: {row['entry']}\n"
+        f"SL: {row['sl']} | TP: {row['tp']}\n"
+        f"Score: {row['score']}\n"
+        f"Winrate: {round(row['winrate']*100,1)}%\n"
+        f"Max DD: {round(row['max_dd']*100,1)}%\n"
+        f"Equity: {row['equity']}x\n"
+        f"Vốn: {capital:,}\n"
+    )
 
     send(msg)
 
+    print("📨 SENT")
 
+
+# ===== RUN =====
 if __name__ == "__main__":
     scan()
