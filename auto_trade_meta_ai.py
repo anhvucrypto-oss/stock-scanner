@@ -14,6 +14,8 @@ CHAT_ID = "1329522024"
 
 LAST_STATE = None
 
+NAV = 100_000_000
+
 
 # ===== TELEGRAM =====
 def send(msg):
@@ -24,22 +26,22 @@ def send(msg):
         pass
 
 
-# ===== LOAD FORECAST =====
+# ===== LOAD FORECAST FULL =====
 def load_forecast():
 
     if not os.path.exists(FORECAST_FILE):
-        return []
+        return None
 
     df = pd.read_csv(FORECAST_FILE)
 
-    if df.empty or "symbol" not in df.columns:
-        return []
+    if df.empty:
+        return None
 
-    symbols = df["symbol"].dropna().tolist()
+    row = df.iloc[0]  # TOP 1
 
-    print("🎯 Forecast symbols:", symbols)
+    print("🎯 Forecast:", row["symbol"])
 
-    return symbols
+    return row
 
 
 # ===== GET DATA =====
@@ -55,10 +57,10 @@ def get_data(symbol):
         return None
 
 
-# ===== SIMPLE ENTRY =====
+# ===== ENTRY =====
 def check_entry(df):
 
-    if len(df) < 25:
+    if len(df) < 20:
         return False
 
     ma20 = df["close"].rolling(20).mean()
@@ -93,9 +95,9 @@ def run():
 
     print("\n🚀 RUNNING...")
 
-    forecast_symbols = load_forecast()
+    forecast = load_forecast()
 
-    if not forecast_symbols:
+    if forecast is None:
 
         if LAST_STATE != "NO_FORECAST":
             send("❌ Chưa có forecast → không trade")
@@ -103,38 +105,44 @@ def run():
 
         return
 
-    for symbol in forecast_symbols:
+    symbol = forecast["symbol"]
 
-        df = get_data(symbol)
+    df = get_data(symbol)
 
-        if df is None:
-            continue
+    if df is None:
+        return
 
-        if check_entry(df):
+    if check_entry(df):
 
-            entry = df["close"].iloc[-1]
-            sl = entry * 0.97
-            tp = entry * 1.05
+        entry = forecast["entry"]
+        sl = forecast["sl"]
+        tp = forecast["tp"]
 
-            msg = f"""
-🔥 TRADE (FROM FORECAST)
+        score = forecast["score"]
+        winrate = forecast["winrate"]
 
-{symbol}
-Entry: {round(entry,1)}
-SL: {round(sl,1)}
-TP: {round(tp,1)}
-"""
+        capital = NAV
 
-            send(msg)
-            save(symbol, entry, sl, tp)
+        msg = (
+            "🔥 TRADE (FROM FORECAST)\n\n"
+            f"{symbol}\n"
+            f"Entry: {entry}\n"
+            f"SL: {sl} | TP: {tp}\n"
+            f"Score: {score}\n"
+            f"Winrate: {round(winrate*100,1)}%\n"
+            f"Vốn: {capital:,}\n"
+        )
 
-            LAST_STATE = "TRADE"
-            return
+        send(msg)
+        save(symbol, entry, sl, tp)
 
-    # ===== NO TRADE =====
-    if LAST_STATE != "NO_TRADE":
-        send("❌ Forecast có nhưng chưa đạt điểm vào")
-        LAST_STATE = "NO_TRADE"
+        LAST_STATE = "TRADE"
+
+    else:
+
+        if LAST_STATE != "WAIT_ENTRY":
+            send("⏳ Đang chờ điểm vào đẹp (theo forecast)")
+            LAST_STATE = "WAIT_ENTRY"
 
 
 # ===== LOOP =====
