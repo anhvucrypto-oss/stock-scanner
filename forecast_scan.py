@@ -116,26 +116,18 @@ def save_state(df):
 
 
 # ===== SAFE SAVE =====
-def safe_save(df):
+def save_state(df):
 
-    temp_file = "forecast_temp.csv"
+    df = df.copy()
+    df = df.drop(columns=["time"], errors="ignore")
 
-    try:
-        df.to_csv(temp_file, index=False)
+    df["entry"] = df["entry"].round(2)
+    df["sl"] = df["sl"].round(2)
+    df["tp"] = df["tp"].round(2)
+    df["score"] = df["score"].round(3)
+    df["winrate"] = df["winrate"].round(3)
 
-        if os.path.exists(FILE):
-            try:
-                os.remove(FILE)
-            except:
-                pass
-
-        os.rename(temp_file, FILE)
-
-        print("📄 Saved forecast.csv")
-
-    except Exception as e:
-        print("❌ Lỗi ghi file:", e)
-
+    df.to_json(STATE_FILE, date_format="iso")
 
 # ===== MAIN =====
 def scan():
@@ -193,8 +185,18 @@ def scan():
 
     # ===== CHECK CHANGE (FIX TRÙNG TELE) =====
     old = load_state()
-    new = df_out.drop(columns=["time"], errors="ignore").to_dict()
+   df_check = df_out.copy()
 
+df_check = df_check.drop(columns=["time"], errors="ignore")
+
+# FIX FLOAT (QUAN TRỌNG NHẤT)
+df_check["entry"] = df_check["entry"].round(2)
+df_check["sl"] = df_check["sl"].round(2)
+df_check["tp"] = df_check["tp"].round(2)
+df_check["score"] = df_check["score"].round(3)
+df_check["winrate"] = df_check["winrate"].round(3)
+
+new = df_check.to_dict()
     if old == new:
         print("⏸ Không đổi → không gửi Telegram")
         return
