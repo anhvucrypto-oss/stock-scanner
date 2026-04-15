@@ -111,16 +111,11 @@ def load_state():
 
 
 def save_state(df):
-    df = df.drop(columns=["time"], errors="ignore")  # ❗ FIX spam
-    df.to_json(STATE_FILE, date_format="iso")
-
-
-# ===== SAFE SAVE =====
-def save_state(df):
 
     df = df.copy()
     df = df.drop(columns=["time"], errors="ignore")
 
+    # FIX FLOAT → tránh spam
     df["entry"] = df["entry"].round(2)
     df["sl"] = df["sl"].round(2)
     df["tp"] = df["tp"].round(2)
@@ -128,6 +123,29 @@ def save_state(df):
     df["winrate"] = df["winrate"].round(3)
 
     df.to_json(STATE_FILE, date_format="iso")
+
+
+# ===== SAFE SAVE =====
+def safe_save(df):
+
+    temp_file = "forecast_temp.csv"
+
+    try:
+        df.to_csv(temp_file, index=False)
+
+        if os.path.exists(FILE):
+            try:
+                os.remove(FILE)
+            except:
+                pass
+
+        os.rename(temp_file, FILE)
+
+        print("📄 Saved forecast.csv")
+
+    except Exception as e:
+        print("❌ Lỗi ghi file:", e)
+
 
 # ===== MAIN =====
 def scan():
@@ -177,26 +195,25 @@ def scan():
 
     # ===== TOP 3 =====
     df_out = df_out.sort_values(by=["score","winrate"], ascending=False).head(3)
-
     df_out = df_out.reset_index(drop=True)
 
-    # ===== LUÔN SAVE FILE =====
+    # ===== SAVE FILE =====
     safe_save(df_out)
 
-    # ===== CHECK CHANGE (FIX TRÙNG TELE) =====
+    # ===== CHECK CHANGE (ANTI-SPAM CHUẨN) =====
     old = load_state()
-   df_check = df_out.copy()
 
-df_check = df_check.drop(columns=["time"], errors="ignore")
+    df_check = df_out.copy()
+    df_check = df_check.drop(columns=["time"], errors="ignore")
 
-# FIX FLOAT (QUAN TRỌNG NHẤT)
-df_check["entry"] = df_check["entry"].round(2)
-df_check["sl"] = df_check["sl"].round(2)
-df_check["tp"] = df_check["tp"].round(2)
-df_check["score"] = df_check["score"].round(3)
-df_check["winrate"] = df_check["winrate"].round(3)
+    df_check["entry"] = df_check["entry"].round(2)
+    df_check["sl"] = df_check["sl"].round(2)
+    df_check["tp"] = df_check["tp"].round(2)
+    df_check["score"] = df_check["score"].round(3)
+    df_check["winrate"] = df_check["winrate"].round(3)
 
-new = df_check.to_dict()
+    new = df_check.to_dict()
+
     if old == new:
         print("⏸ Không đổi → không gửi Telegram")
         return
