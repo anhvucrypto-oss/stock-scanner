@@ -247,3 +247,15 @@ def scan():
 # ===== RUN =====
 if __name__ == "__main__":
     scan()
+
+
+import os
+
+def push_github():
+    try:
+        os.system("git add forecast.csv")
+        os.system('git commit -m "update forecast"')
+        os.system("git push")
+        print("📡 pushed GitHub")
+    except:
+        print("❌ GitHub lỗi")
