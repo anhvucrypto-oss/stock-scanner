@@ -2,18 +2,22 @@ import pandas as pd
 import requests
 from datetime import datetime
 import os
+import time
 
 # ===== PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 FORECAST_FILE = "forecast.csv"
 LOG = "trades_log.csv"
-MSG_STATE_FILE = "bot_msg_state.txt"
+
+STATE_FILE = "bot_state.json"
 
 TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
 CHAT_ID = "1329522024"
 
 NAV = 100_000_000
+
+COOLDOWN = 600  # 10 phút
 
 
 # ===== TELEGRAM =====
@@ -25,17 +29,18 @@ def send(msg):
         print("❌ Telegram lỗi")
 
 
-# ===== MESSAGE STATE (ANTI-SPAM) =====
-def load_msg_state():
-    if not os.path.exists(MSG_STATE_FILE):
-        return None
-    with open(MSG_STATE_FILE, "r", encoding="utf-8") as f:
-        return f.read()
+# ===== STATE =====
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {"last_msg": "", "last_time": 0}
+    try:
+        return pd.read_json(STATE_FILE).to_dict()
+    except:
+        return {"last_msg": "", "last_time": 0}
 
 
-def save_msg_state(msg):
-    with open(MSG_STATE_FILE, "w", encoding="utf-8") as f:
-        f.write(msg)
+def save_state(state):
+    pd.DataFrame([state]).to_json(STATE_FILE)
 
 
 # ===== LOAD FORECAST =====
@@ -66,12 +71,10 @@ def get_data(symbol):
 
 # ===== ENTRY =====
 def check_entry(df):
-
     if len(df) < 20:
         return False
 
     ma20 = df["close"].rolling(20).mean()
-
     return bool(df["close"].iloc[-1] > ma20.iloc[-1])
 
 
@@ -101,15 +104,12 @@ def run():
     print("\n🚀 BOT RUNNING...")
 
     forecast_df = load_forecast()
-
     if forecast_df is None:
-        print("❌ Không có forecast")
         return
 
     results = []
     best_trade = None
 
-    # ===== LOOP TOP 3 =====
     for i, row in forecast_df.iterrows():
 
         symbol = str(row["symbol"])
@@ -120,13 +120,7 @@ def run():
 
         has_entry = check_entry(df)
 
-        # ===== VỐN =====
-        if i == 0:
-            capital = int(NAV * 0.5)
-        elif i == 1:
-            capital = int(NAV * 0.3)
-        else:
-            capital = int(NAV * 0.2)
+        capital = int(NAV * [0.5, 0.3, 0.2][i])
 
         results.append({
             "symbol": symbol,
@@ -139,17 +133,20 @@ def run():
             "has_entry": has_entry
         })
 
-        # chọn kèo đầu tiên có entry
         if has_entry and best_trade is None:
             best_trade = results[-1]
 
-    # ===== SORT READY LÊN TRÊN =====
+    # SORT READY lên trên
     results = sorted(results, key=lambda x: x["has_entry"], reverse=True)
 
     # ===== BUILD MESSAGE =====
     msg = "TOP 3 T+4 PICKS\n\n"
+    has_any_ready = False
 
     for r in results:
+
+        if r["has_entry"]:
+            has_any_ready = True
 
         msg += (
             f"{r['symbol']}\n"
@@ -162,15 +159,33 @@ def run():
 
         msg += "👉 READY\n\n" if r["has_entry"] else "⏳ WAIT\n\n"
 
-    # ===== ANTI-SPAM TELEGRAM =====
-    old_msg = load_msg_state()
+    # ===== LOAD STATE =====
+    state = load_state()
+    now = time.time()
 
-    if msg != old_msg:
+    # ===== RULE 1: READY mới xuất hiện =====
+    prev_ready = "👉 READY" in state.get("last_msg", "")
+    new_ready = has_any_ready
+
+    ready_event = (new_ready and not prev_ready)
+
+    # ===== RULE 2: COOLDOWN =====
+    cooldown_ok = now - state.get("last_time", 0) > COOLDOWN
+
+    # ===== DECISION =====
+    if ready_event or cooldown_ok:
+
         send(msg)
-        save_msg_state(msg)
-        print("📨 Sent (changed)")
+
+        save_state({
+            "last_msg": msg,
+            "last_time": now
+        })
+
+        print("📨 Sent")
+
     else:
-        print("⏸ Không đổi → không gửi")
+        print("⏸ Skip (cooldown / no new signal)")
 
     # ===== SAVE TRADE =====
     if best_trade:
@@ -182,6 +197,6 @@ def run():
         )
 
 
-# ===== RUN RIÊNG =====
+# ===== RUN =====
 if __name__ == "__main__":
     run()
