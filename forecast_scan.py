@@ -3,28 +3,11 @@ import requests
 from datetime import datetime
 import os
 
-# ===== FIX PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 FILE = "forecast.csv"
-STATE_FILE = "forecast_state.json"
-
-TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
-CHAT_ID = "1329522024"
-
-NAV = 100_000_000
 
 
-# ===== TELEGRAM =====
-def send(msg):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
-    except:
-        pass
-
-
-# ===== LOAD SYMBOL =====
 def load_symbols():
     try:
         df = pd.read_csv("symbols.csv")
@@ -33,11 +16,10 @@ def load_symbols():
         return []
 
 
-# ===== GET DATA =====
 def get_data(symbol):
     try:
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&resolution=1D&from=1700000000&to=9999999999"
-        data = requests.get(url).json()
+        data = requests.get(url, timeout=10).json()
 
         return pd.DataFrame({
             "close": data["c"],
@@ -49,9 +31,7 @@ def get_data(symbol):
         return None
 
 
-# ===== SCORE =====
 def compute_score(df):
-
     if len(df) < 50:
         return None
 
@@ -64,8 +44,8 @@ def compute_score(df):
         return None
 
     momentum = (close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]
-
     pullback = close.iloc[-1] < close.rolling(10).max().iloc[-1] * 0.98
+
     if not pullback:
         return None
 
@@ -79,14 +59,11 @@ def compute_score(df):
     return round(score,4)
 
 
-# ===== BACKTEST =====
 def backtest(df):
-
     wins = 0
     total = 0
 
     for i in range(50, len(df)-5):
-
         entry = df["close"].iloc[i]
         tp = entry * 1.04
 
@@ -100,57 +77,9 @@ def backtest(df):
     return round(wins/total,3) if total else 0
 
 
-# ===== STATE =====
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return None
-    try:
-        return pd.read_json(STATE_FILE).to_dict()
-    except:
-        return None
-
-
-def save_state(df):
-
-    df = df.copy()
-    df = df.drop(columns=["time"], errors="ignore")
-
-    # FIX FLOAT → tránh spam
-    df["entry"] = df["entry"].round(2)
-    df["sl"] = df["sl"].round(2)
-    df["tp"] = df["tp"].round(2)
-    df["score"] = df["score"].round(3)
-    df["winrate"] = df["winrate"].round(3)
-
-    df.to_json(STATE_FILE, date_format="iso")
-
-
-# ===== SAFE SAVE =====
-def safe_save(df):
-
-    temp_file = "forecast_temp.csv"
-
-    try:
-        df.to_csv(temp_file, index=False)
-
-        if os.path.exists(FILE):
-            try:
-                os.remove(FILE)
-            except:
-                pass
-
-        os.rename(temp_file, FILE)
-
-        print("📄 Saved forecast.csv")
-
-    except Exception as e:
-        print("❌ Lỗi ghi file:", e)
-
-
-# ===== MAIN =====
 def scan():
 
-    print("\n⏰ START:", datetime.now())
+    print("\n⏰ SCAN:", datetime.now())
 
     symbols = load_symbols()
     results = []
@@ -175,13 +104,11 @@ def scan():
             "sl": round(entry*0.98,1),
             "tp": round(entry*1.04,1),
             "score": score,
-            "winrate": winrate,
-            "time": datetime.now()
+            "winrate": winrate
         })
 
     df_out = pd.DataFrame(results)
 
-    # ===== KHÔNG BAO GIỜ RỖNG =====
     if df_out.empty:
         df_out = pd.DataFrame([{
             "symbol": "NO_SIGNAL",
@@ -189,73 +116,12 @@ def scan():
             "sl": 0,
             "tp": 0,
             "score": 0,
-            "winrate": 0,
-            "time": datetime.now()
+            "winrate": 0
         }])
 
-    # ===== TOP 3 =====
     df_out = df_out.sort_values(by=["score","winrate"], ascending=False).head(3)
     df_out = df_out.reset_index(drop=True)
 
-    # ===== SAVE FILE =====
-    safe_save(df_out)
+    df_out.to_csv(FILE, index=False)
 
-    # ===== CHECK CHANGE (ANTI-SPAM CHUẨN) =====
-    old = load_state()
-
-    df_check = df_out.copy()
-    df_check = df_check.drop(columns=["time"], errors="ignore")
-
-    df_check["entry"] = df_check["entry"].round(2)
-    df_check["sl"] = df_check["sl"].round(2)
-    df_check["tp"] = df_check["tp"].round(2)
-    df_check["score"] = df_check["score"].round(3)
-    df_check["winrate"] = df_check["winrate"].round(3)
-
-    new = df_check.to_dict()
-
-    if old == new:
-        print("⏸ Không đổi → không gửi Telegram")
-        return
-
-    save_state(df_out)
-
-    # ===== TELEGRAM =====
-    weights = [0.5, 0.3, 0.2]
-
-    msg = "TOP 3 T+4 PICKS\n\n"
-
-    for idx, row in df_out.iterrows():
-
-        capital = int(NAV * weights[idx])
-
-        msg += (
-            f"{row['symbol']}\n"
-            f"Entry: {row['entry']}\n"
-            f"SL: {row['sl']} | TP: {row['tp']}\n"
-            f"Score: {row['score']}\n"
-            f"Winrate: {round(row['winrate']*100,1)}%\n"
-            f"Vốn: {capital:,}\n\n"
-        )
-
-    send(msg)
-
-    print("📨 Sent Telegram")
-    print("✅ DONE:", datetime.now())
-
-
-# ===== RUN =====
-if __name__ == "__main__":
-    scan()
-
-
-import os
-
-def push_github():
-    try:
-        os.system("git add forecast.csv")
-        os.system('git commit -m "update forecast"')
-        os.system("git push")
-        print("📡 pushed GitHub")
-    except:
-        print("❌ GitHub lỗi")
+    print("📄 Saved forecast.csv")
