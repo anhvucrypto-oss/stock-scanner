@@ -1,16 +1,14 @@
 import pandas as pd
 import requests
 from datetime import datetime
-import time
 import os
-import json
 
-# ===== FIX PATH =====
+# ===== PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-LOG = "trades_log.csv"
 FORECAST_FILE = "forecast.csv"
-STATE_FILE = "bot_state.json"
+LOG = "trades_log.csv"
+MSG_STATE_FILE = "bot_msg_state.txt"
 
 TELEGRAM_TOKEN = "8216332974:AAHQS-fk-gq5aX3cPp0j8xcjXzl6BhA01zs"
 CHAT_ID = "1329522024"
@@ -22,9 +20,22 @@ NAV = 100_000_000
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
     except:
-        pass
+        print("❌ Telegram lỗi")
+
+
+# ===== MESSAGE STATE (ANTI-SPAM) =====
+def load_msg_state():
+    if not os.path.exists(MSG_STATE_FILE):
+        return None
+    with open(MSG_STATE_FILE, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def save_msg_state(msg):
+    with open(MSG_STATE_FILE, "w", encoding="utf-8") as f:
+        f.write(msg)
 
 
 # ===== LOAD FORECAST =====
@@ -40,31 +51,11 @@ def load_forecast():
     return df.head(3)
 
 
-# ===== LOAD STATE =====
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return None
-    try:
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return None
-
-
-# ===== SAVE STATE =====
-def save_state(state):
-    try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state, f, indent=2)
-    except Exception as e:
-        print("❌ Lỗi save state:", e)
-
-
 # ===== GET DATA =====
 def get_data(symbol):
     try:
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&resolution=1D&from=1700000000&to=9999999999"
-        data = requests.get(url).json()
+        data = requests.get(url, timeout=10).json()
 
         return pd.DataFrame({
             "close": data["c"]
@@ -81,7 +72,7 @@ def check_entry(df):
 
     ma20 = df["close"].rolling(20).mean()
 
-    return bool(df["close"].iloc[-1] > ma20.iloc[-1])  # ép bool chuẩn
+    return bool(df["close"].iloc[-1] > ma20.iloc[-1])
 
 
 # ===== SAVE TRADE =====
@@ -104,21 +95,10 @@ def save_trade(symbol, entry, sl, tp):
     df.to_csv(LOG, index=False)
 
 
-# ===== BUILD STATE (FIX JSON) =====
-def build_state(results):
-    return [
-        {
-            "symbol": str(r["symbol"]),
-            "has_entry": bool(r["has_entry"])
-        }
-        for r in results
-    ]
-
-
 # ===== MAIN =====
 def run():
 
-    print("\n🚀 RUNNING BOT...")
+    print("\n🚀 BOT RUNNING...")
 
     forecast_df = load_forecast()
 
@@ -129,6 +109,7 @@ def run():
     results = []
     best_trade = None
 
+    # ===== LOOP TOP 3 =====
     for i, row in forecast_df.iterrows():
 
         symbol = str(row["symbol"])
@@ -139,7 +120,7 @@ def run():
 
         has_entry = check_entry(df)
 
-        # ===== PHÂN BỔ VỐN =====
+        # ===== VỐN =====
         if i == 0:
             capital = int(NAV * 0.5)
         elif i == 1:
@@ -158,23 +139,14 @@ def run():
             "has_entry": has_entry
         })
 
+        # chọn kèo đầu tiên có entry
         if has_entry and best_trade is None:
             best_trade = results[-1]
 
     # ===== SORT READY LÊN TRÊN =====
     results = sorted(results, key=lambda x: x["has_entry"], reverse=True)
 
-    # ===== STATE CHECK =====
-    new_state = build_state(results)
-    old_state = load_state()
-
-    if new_state == old_state:
-        print("⏸ Không đổi → không gửi")
-        return
-
-    save_state(new_state)
-
-    # ===== TELEGRAM =====
+    # ===== BUILD MESSAGE =====
     msg = "TOP 3 T+4 PICKS\n\n"
 
     for r in results:
@@ -190,9 +162,17 @@ def run():
 
         msg += "👉 READY\n\n" if r["has_entry"] else "⏳ WAIT\n\n"
 
-    send(msg)
+    # ===== ANTI-SPAM TELEGRAM =====
+    old_msg = load_msg_state()
 
-    # ===== SAVE TRADE (CHỈ 1 MÃ) =====
+    if msg != old_msg:
+        send(msg)
+        save_msg_state(msg)
+        print("📨 Sent (changed)")
+    else:
+        print("⏸ Không đổi → không gửi")
+
+    # ===== SAVE TRADE =====
     if best_trade:
         save_trade(
             best_trade["symbol"],
@@ -202,6 +182,6 @@ def run():
         )
 
 
-# ===== CHẠY RIÊNG (KHÔNG AUTO KHI IMPORT) =====
+# ===== RUN RIÊNG =====
 if __name__ == "__main__":
     run()
