@@ -2,6 +2,8 @@ import pandas as pd
 import requests
 from datetime import datetime
 import os
+import json
+import hashlib
 
 # ===== PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -33,15 +35,17 @@ def allow_send_time():
 # ===== STATE =====
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"sig": "", "ready": False}
+        return {"sig": ""}
     try:
-        return pd.read_json(STATE_FILE).to_dict()
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
     except:
-        return {"sig": "", "ready": False}
+        return {"sig": ""}
 
 
 def save_state(state):
-    pd.DataFrame([state]).to_json(STATE_FILE)
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
 
 
 # ===== LOAD FORECAST =====
@@ -79,6 +83,28 @@ def check_entry(df):
     return bool(df["close"].iloc[-1] > ma20.iloc[-1])
 
 
+# ===== SIGNATURE (ANTI DUPLICATE) =====
+def build_signature(results):
+
+    clean = []
+
+    for r in results:
+        clean.append({
+            "symbol": r["symbol"],
+            "entry": round(float(r["entry"]), 2),
+            "sl": round(float(r["sl"]), 2),
+            "tp": round(float(r["tp"]), 2),
+            "score": round(float(r["score"]), 3)
+        })
+
+    # sort để tránh reorder gây spam
+    clean = sorted(clean, key=lambda x: x["symbol"])
+
+    data = json.dumps(clean, sort_keys=True)
+
+    return hashlib.md5(data.encode()).hexdigest()
+
+
 # ===== MAIN =====
 def run():
 
@@ -90,9 +116,7 @@ def run():
         return
 
     results = []
-    has_any_ready = False
 
-    # ===== LOOP =====
     for i, row in forecast_df.iterrows():
 
         symbol = str(row["symbol"])
@@ -102,9 +126,6 @@ def run():
             continue
 
         has_entry = check_entry(df)
-
-        if has_entry:
-            has_any_ready = True
 
         capital = int(NAV * [0.5, 0.3, 0.2][i])
 
@@ -119,14 +140,11 @@ def run():
             "has_entry": has_entry
         })
 
-    # ===== SORT READY =====
+    # sort READY lên trên
     results = sorted(results, key=lambda x: x["has_entry"], reverse=True)
 
-    # ===== SIGNATURE (QUAN TRỌNG NHẤT) =====
-    sig = str([
-        (r["symbol"], round(r["entry"],2), round(r["sl"],2), round(r["tp"],2))
-        for r in results
-    ])
+    # ===== BUILD SIGNATURE =====
+    sig = build_signature(results)
 
     # ===== LOAD STATE =====
     state = load_state()
@@ -148,7 +166,7 @@ def run():
 
         msg += "👉 READY\n\n" if r["has_entry"] else "⏳ WAIT\n\n"
 
-    # ===== LOGIC GỬI =====
+    # ===== SEND LOGIC =====
     if sig != prev_sig:
 
         if allow_send_time():
@@ -158,13 +176,10 @@ def run():
             print("⏸ Trước 09:30 → không gửi")
 
     else:
-        print("⏸ Không đổi → không gửi")
+        print("⏸ Duplicate → skip")
 
     # ===== SAVE STATE =====
-    save_state({
-        "sig": sig,
-        "ready": has_any_ready
-    })
+    save_state({"sig": sig})
 
 
 # ===== RUN =====
