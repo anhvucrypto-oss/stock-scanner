@@ -9,7 +9,7 @@ st.title("📊 TRADING DASHBOARD")
 FILE = "forecast.csv"
 HISTORY_FILE = "forecast_history.csv"
 
-# ===== CURRENT =====
+# ===== CURRENT PICKS =====
 st.subheader("🔥 CURRENT PICKS")
 
 if os.path.exists(FILE):
@@ -18,23 +18,23 @@ if os.path.exists(FILE):
 
     if not df.empty:
 
-        for i, row in df.iterrows():
+        # format đẹp hơn
+        df_display = df.copy()
 
-            st.markdown(f"### {row['symbol']}")
+        df_display["winrate"] = (df_display["winrate"] * 100).round(1).astype(str) + "%"
+        df_display["score"] = df_display["score"].round(3)
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Entry", row["entry"])
-            col2.metric("SL", row["sl"])
-            col3.metric("TP", row["tp"])
+        st.dataframe(df_display, use_container_width=True)
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Score", row["score"])
-            col2.metric("Winrate", f"{round(row['winrate']*100,1)}%")
+    else:
+        st.warning("No current data")
 
-            st.markdown("---")
+else:
+    st.warning("forecast.csv not found")
+
 
 # ===== HISTORY =====
-st.subheader("📜 HISTORY (7 DAYS FIFO)")
+st.subheader("📜 HISTORY (7 DAYS)")
 
 if os.path.exists(HISTORY_FILE):
 
@@ -43,14 +43,16 @@ if os.path.exists(HISTORY_FILE):
     if not df.empty:
 
         df["time"] = pd.to_datetime(df["time"])
-
-        # mới nhất lên trên
         df = df.sort_values(by="time", ascending=False)
+
+        # format
+        df["winrate"] = (df["winrate"] * 100).round(1).astype(str) + "%"
+        df["score"] = df["score"].round(3)
 
         st.dataframe(df, use_container_width=True)
 
     else:
-        st.warning("No history")
+        st.warning("No history data")
 
 else:
     st.warning("No history file")
