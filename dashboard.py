@@ -1,67 +1,56 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime
 
 st.set_page_config(layout="wide")
 
 st.title("📊 TRADING DASHBOARD")
 
-# ===== REFRESH BUTTON (ổn định hơn sleep + rerun) =====
-if st.button("🔄 Refresh"):
-    st.rerun()
-
-st.caption(f"Cập nhật lúc: {datetime.now().strftime('%H:%M:%S')}")
-
-# ==============================
-# 📊 FORECAST
-# ==============================
-st.subheader("📊 TOP 3 T+4 PICKS")
-
 FILE = "forecast.csv"
+HISTORY_FILE = "forecast_history.csv"
 
-# DEBUG
-st.write("📂 File tồn tại:", os.path.exists(FILE))
+# ===== CURRENT =====
+st.subheader("🔥 CURRENT PICKS")
 
 if os.path.exists(FILE):
 
-    try:
-        df = pd.read_csv(FILE)
+    df = pd.read_csv(FILE)
 
-        st.write("📊 Raw data:")
-        st.dataframe(df)   # 👉 DEBUG xem có data không
+    if not df.empty:
 
-        if not df.empty:
+        for i, row in df.iterrows():
 
-            df = df.reset_index(drop=True)
+            st.markdown(f"### {row['symbol']}")
 
-            weights = [0.5, 0.3, 0.2]
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Entry", row["entry"])
+            col2.metric("SL", row["sl"])
+            col3.metric("TP", row["tp"])
 
-            for i in range(min(3, len(df))):
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Score", row["score"])
+            col2.metric("Winrate", f"{round(row['winrate']*100,1)}%")
 
-                row = df.iloc[i]
+            st.markdown("---")
 
-                st.markdown(f"### 🔥 {row['symbol']}")
+# ===== HISTORY =====
+st.subheader("📜 HISTORY (7 DAYS FIFO)")
 
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Entry", row["entry"])
-                col2.metric("SL", row["sl"])
-                col3.metric("TP", row["tp"])
+if os.path.exists(HISTORY_FILE):
 
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Score", row["score"])
-                col2.metric("Winrate", f"{round(row['winrate']*100,1)}%")
+    df = pd.read_csv(HISTORY_FILE)
 
-                capital = int(100_000_000 * weights[i])
-                col3.metric("Vốn", f"{capital:,}")
+    if not df.empty:
 
-                st.markdown("---")
+        df["time"] = pd.to_datetime(df["time"])
 
-        else:
-            st.warning("⚠️ forecast.csv rỗng")
+        # mới nhất lên trên
+        df = df.sort_values(by="time", ascending=False)
 
-    except Exception as e:
-        st.error(f"❌ Lỗi đọc file: {e}")
+        st.dataframe(df, use_container_width=True)
+
+    else:
+        st.warning("No history")
 
 else:
-    st.warning("❌ Không tìm thấy forecast.csv")
+    st.warning("No history file")
