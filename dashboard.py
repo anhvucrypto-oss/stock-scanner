@@ -9,28 +9,27 @@ st.title("📊 TRADING DASHBOARD")
 FILE = "forecast.csv"
 HISTORY_FILE = "forecast_history.csv"
 
-# ===== CURRENT PICKS =====
+
+# ===== CURRENT =====
 st.subheader("🔥 CURRENT PICKS")
 
 if os.path.exists(FILE):
-
     df = pd.read_csv(FILE)
 
     if not df.empty:
+        df["winrate"] = (df["winrate"]*100).round(1).astype(str) + "%"
+        st.dataframe(df, use_container_width=True)
 
-        # format đẹp hơn
-        df_display = df.copy()
 
-        df_display["winrate"] = (df_display["winrate"] * 100).round(1).astype(str) + "%"
-        df_display["score"] = df_display["score"].round(3)
-
-        st.dataframe(df_display, use_container_width=True)
-
-    else:
-        st.warning("No current data")
-
-else:
-    st.warning("forecast.csv not found")
+# ===== COLOR =====
+def color_status(val):
+    if val == "WIN":
+        return "background-color: #d4edda"
+    if val == "LOSS":
+        return "background-color: #f8d7da"
+    if val == "HOLD":
+        return "background-color: #fff3cd"
+    return ""
 
 
 # ===== HISTORY =====
@@ -45,14 +44,9 @@ if os.path.exists(HISTORY_FILE):
         df["time"] = pd.to_datetime(df["time"])
         df = df.sort_values(by="time", ascending=False)
 
-        # format
-        df["winrate"] = (df["winrate"] * 100).round(1).astype(str) + "%"
-        df["score"] = df["score"].round(3)
+        df["winrate"] = (df["winrate"]*100).round(1).astype(str) + "%"
 
-        st.dataframe(df, use_container_width=True)
-
-    else:
-        st.warning("No history data")
-
-else:
-    st.warning("No history file")
+        st.dataframe(
+            df.style.applymap(color_status, subset=["status"]),
+            use_container_width=True
+        )
