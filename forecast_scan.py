@@ -9,6 +9,7 @@ FILE = "forecast.csv"
 HISTORY_FILE = "forecast_history.csv"
 
 
+# ===== LOAD SYMBOL =====
 def load_symbols():
     try:
         df = pd.read_csv("symbols.csv")
@@ -17,6 +18,7 @@ def load_symbols():
         return []
 
 
+# ===== GET DATA =====
 def get_data(symbol):
     try:
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&resolution=1D&from=1700000000&to=9999999999"
@@ -32,12 +34,14 @@ def get_data(symbol):
         return None
 
 
+# ===== SCORE =====
 def compute_score(df):
 
     if len(df) < 50:
         return None
 
     close = df["close"]
+
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
 
@@ -60,6 +64,7 @@ def compute_score(df):
     return round(score,4)
 
 
+# ===== BACKTEST =====
 def backtest(df):
 
     wins = 0
@@ -79,11 +84,53 @@ def backtest(df):
     return round(wins/total,3) if total else 0
 
 
-# ===== SAVE HISTORY (NO DUPLICATE + FIFO) =====
+# ===== UPDATE T+4 RESULT =====
+def update_results():
+
+    if not os.path.exists(HISTORY_FILE):
+        return
+
+    df = pd.read_csv(HISTORY_FILE)
+
+    if df.empty:
+        return
+
+    df["time"] = pd.to_datetime(df["time"])
+
+    for i, row in df.iterrows():
+
+        if row.get("status") != "OPEN":
+            continue
+
+        symbol = row["symbol"]
+
+        price_df = get_data(symbol)
+        if price_df is None or len(price_df) < 10:
+            continue
+
+        future = price_df.tail(5)
+
+        hit_tp = any(future["high"] >= row["tp"])
+        hit_sl = any(future["low"] <= row["sl"])
+
+        if hit_tp:
+            df.at[i, "status"] = "WIN"
+        elif hit_sl:
+            df.at[i, "status"] = "LOSS"
+        else:
+            days = (datetime.now() - row["time"]).days
+            if days >= 4:
+                df.at[i, "status"] = "HOLD"
+
+    df.to_csv(HISTORY_FILE, index=False)
+
+
+# ===== SAVE HISTORY =====
 def save_history(df_out):
 
     df_new = df_out.copy()
     df_new["time"] = datetime.now()
+    df_new["status"] = "OPEN"
 
     if os.path.exists(HISTORY_FILE):
         df_old = pd.read_csv(HISTORY_FILE)
@@ -91,7 +138,7 @@ def save_history(df_out):
     else:
         df = df_new
 
-    # KEY chống trùng
+    # chống trùng
     df["key"] = (
         df["symbol"].astype(str)
         + df["entry"].astype(str)
@@ -159,6 +206,7 @@ def scan():
     df_out.to_csv(FILE, index=False)
 
     save_history(df_out)
+    update_results()
 
     print("📄 Saved forecast + history")
 
