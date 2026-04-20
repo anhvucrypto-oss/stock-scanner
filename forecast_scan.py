@@ -3,14 +3,12 @@ import requests
 from datetime import datetime
 import os
 
-# ===== PATH =====
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 FILE = "forecast.csv"
 HISTORY_FILE = "forecast_history.csv"
 
 
-# ===== LOAD SYMBOL =====
 def load_symbols():
     try:
         df = pd.read_csv("symbols.csv")
@@ -19,7 +17,6 @@ def load_symbols():
         return []
 
 
-# ===== GET DATA =====
 def get_data(symbol):
     try:
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&resolution=1D&from=1700000000&to=9999999999"
@@ -35,14 +32,12 @@ def get_data(symbol):
         return None
 
 
-# ===== SCORE =====
 def compute_score(df):
 
     if len(df) < 50:
         return None
 
     close = df["close"]
-
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
 
@@ -50,8 +45,8 @@ def compute_score(df):
         return None
 
     momentum = (close.iloc[-1] - close.iloc[-5]) / close.iloc[-5]
-
     pullback = close.iloc[-1] < close.rolling(10).max().iloc[-1] * 0.98
+
     if not pullback:
         return None
 
@@ -65,14 +60,12 @@ def compute_score(df):
     return round(score,4)
 
 
-# ===== BACKTEST =====
 def backtest(df):
 
     wins = 0
     total = 0
 
     for i in range(50, len(df)-5):
-
         entry = df["close"].iloc[i]
         tp = entry * 1.04
 
@@ -86,21 +79,34 @@ def backtest(df):
     return round(wins/total,3) if total else 0
 
 
-# ===== SAVE HISTORY FIFO =====
+# ===== SAVE HISTORY (NO DUPLICATE + FIFO) =====
 def save_history(df_out):
 
-    df = df_out.copy()
-    df["time"] = datetime.now()
+    df_new = df_out.copy()
+    df_new["time"] = datetime.now()
 
     if os.path.exists(HISTORY_FILE):
-        old = pd.read_csv(HISTORY_FILE)
-        df = pd.concat([old, df], ignore_index=True)
+        df_old = pd.read_csv(HISTORY_FILE)
+        df = pd.concat([df_old, df_new], ignore_index=True)
+    else:
+        df = df_new
 
-    # ===== FIFO 7 NGÀY =====
+    # KEY chống trùng
+    df["key"] = (
+        df["symbol"].astype(str)
+        + df["entry"].astype(str)
+        + df["sl"].astype(str)
+        + df["tp"].astype(str)
+    )
+
+    df = df.drop_duplicates(subset="key", keep="last")
+
+    # FIFO 7 ngày
     df["time"] = pd.to_datetime(df["time"])
     cutoff = datetime.now() - pd.Timedelta(days=7)
-
     df = df[df["time"] >= cutoff]
+
+    df = df.drop(columns=["key"])
 
     df.to_csv(HISTORY_FILE, index=False)
 
@@ -124,7 +130,6 @@ def scan():
             continue
 
         winrate = backtest(df)
-
         entry = df["close"].iloc[-1]
 
         results.append({
@@ -138,7 +143,6 @@ def scan():
 
     df_out = pd.DataFrame(results)
 
-    # ===== KHÔNG BAO GIỜ RỖNG =====
     if df_out.empty:
         df_out = pd.DataFrame([{
             "symbol": "NO_SIGNAL",
@@ -149,19 +153,15 @@ def scan():
             "winrate": 0
         }])
 
-    # ===== TOP 3 =====
     df_out = df_out.sort_values(by=["score","winrate"], ascending=False).head(3)
     df_out = df_out.reset_index(drop=True)
 
-    # ===== SAVE CURRENT =====
     df_out.to_csv(FILE, index=False)
 
-    # ===== SAVE HISTORY =====
     save_history(df_out)
 
-    print("📄 Saved forecast.csv + history")
+    print("📄 Saved forecast + history")
 
 
-# ===== RUN =====
 if __name__ == "__main__":
     scan()
