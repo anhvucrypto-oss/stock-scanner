@@ -32,22 +32,6 @@ def allow_send_time():
     return (now.hour > 9) or (now.hour == 9 and now.minute >= 30)
 
 
-# ===== STATE =====
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return {"sig": "", "sent_once": False}
-    try:
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {"sig": "", "sent_once": False}
-
-
-def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
-
-
 # ===== LOAD FORECAST =====
 def load_forecast():
     if not os.path.exists(FORECAST_FILE):
@@ -74,11 +58,12 @@ def get_data(symbol):
 def check_entry(df):
     if len(df) < 20:
         return False
+
     ma20 = df["close"].rolling(20).mean()
     return bool(df["close"].iloc[-1] > ma20.iloc[-1])
 
 
-# ===== SIGNATURE =====
+# ===== SIGNATURE (CHỐNG TRÙNG) =====
 def build_signature(results):
     clean = []
     for r in results:
@@ -129,14 +114,7 @@ def run():
     # READY lên trên
     results = sorted(results, key=lambda x: x["has_entry"], reverse=True)
 
-    # ===== SIGNATURE =====
-    sig = build_signature(results)
-
-    state = load_state()
-    prev_sig = state["sig"]
-    sent_once = state["sent_once"]
-
-    # ===== BUILD MESSAGE (GIỮ FORMAT CHUẨN) =====
+    # ===== BUILD MESSAGE (GIỮ NGUYÊN FORMAT) =====
     msg = "TOP 3 T+4 PICKS\n\n"
 
     for r in results:
@@ -148,38 +126,35 @@ def run():
             f"Winrate: {round(r['winrate']*100,1)}%\n"
             f"Vốn: {r['capital']:,}\n"
         )
-
         msg += "👉 READY\n\n" if r["has_entry"] else "⏳ WAIT\n\n"
 
-    # ===== LOGIC GỬI =====
-    should_send = False
+    # ===== SIGNATURE =====
+    sig = build_signature(results)
 
-    # lần đầu luôn gửi
-    if not sent_once:
-        should_send = True
-        print("🟢 First run")
-
-    # kèo thay đổi
-    elif sig != prev_sig:
-        should_send = True
-        print("🟡 New signal")
-
+    # ===== LOAD STATE =====
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r") as f:
+            state = json.load(f)
     else:
-        print("⏸ Duplicate")
+        state = {"sig": ""}
+
+    prev_sig = state.get("sig", "")
 
     # ===== SEND =====
-    if should_send:
+    if sig != prev_sig:
         if allow_send_time():
             send(msg)
+            print("📨 SENT")
         else:
             print("⏸ Before 09:30")
+    else:
+        print("⏸ Duplicate → skip")
 
     # ===== SAVE STATE =====
-    save_state({
-        "sig": sig,
-        "sent_once": True
-    })
+    with open(STATE_FILE, "w") as f:
+        json.dump({"sig": sig}, f)
 
 
+# ===== RUN =====
 if __name__ == "__main__":
     run()
