@@ -4,7 +4,6 @@ from datetime import datetime
 import os
 import json
 import hashlib
-import time
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -17,6 +16,7 @@ CHAT_ID = "1329522024"
 NAV = 100_000_000
 
 
+# ===== TELEGRAM =====
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -25,6 +25,7 @@ def send(msg):
         print("❌ Telegram lỗi")
 
 
+# ===== TIME FILTER =====
 def allow_send_time():
     now = datetime.now()
     return (now.hour > 9) or (now.hour == 9 and now.minute >= 30)
@@ -33,12 +34,12 @@ def allow_send_time():
 # ===== STATE =====
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"sig": "", "ready": False, "time": 0}
+        return {"sig": "", "ready": False, "sent_once": False}
     try:
         with open(STATE_FILE, "r") as f:
             return json.load(f)
     except:
-        return {"sig": "", "ready": False, "time": 0}
+        return {"sig": "", "ready": False, "sent_once": False}
 
 
 def save_state(state):
@@ -46,6 +47,7 @@ def save_state(state):
         json.dump(state, f)
 
 
+# ===== LOAD FORECAST =====
 def load_forecast():
     if not os.path.exists(FORECAST_FILE):
         return None
@@ -57,6 +59,7 @@ def load_forecast():
     return df.head(3)
 
 
+# ===== GET DATA =====
 def get_data(symbol):
     try:
         url = f"https://services.entrade.com.vn/chart-api/v2/ohlcs/stock?symbol={symbol}&resolution=1D&from=1700000000&to=9999999999"
@@ -67,6 +70,7 @@ def get_data(symbol):
         return None
 
 
+# ===== ENTRY =====
 def check_entry(df):
     if len(df) < 20:
         return False
@@ -83,10 +87,9 @@ def build_signature(results):
     for r in results:
         clean.append({
             "symbol": r["symbol"],
-            "entry": round(r["entry"],2),
-            "sl": round(r["sl"],2),
-            "tp": round(r["tp"],2),
-            "score": round(r["score"],3)
+            "entry": round(r["entry"], 2),
+            "sl": round(r["sl"], 2),
+            "tp": round(r["tp"], 2)
         })
 
     clean = sorted(clean, key=lambda x: x["symbol"])
@@ -102,6 +105,7 @@ def run():
 
     forecast_df = load_forecast()
     if forecast_df is None:
+        print("❌ Không có forecast")
         return
 
     results = []
@@ -123,7 +127,7 @@ def run():
             "tp": float(row["tp"]),
             "score": float(row["score"]),
             "winrate": float(row["winrate"]),
-            "capital": int(NAV * [0.5,0.3,0.2][i]),
+            "capital": int(NAV * [0.5, 0.3, 0.2][i]),
             "has_entry": has_entry
         })
 
@@ -132,17 +136,12 @@ def run():
     sig = build_signature(results)
 
     state = load_state()
-    prev_sig = state["sig"]
 
-    now = time.time()
-    last_time = state["time"]
+    prev_sig = state["sig"]
+    prev_ready = state["ready"]
+    sent_once = state.get("sent_once", False)
 
     has_ready = any(r["has_entry"] for r in results)
-    prev_ready = state["ready"]
-
-    ready_event = has_ready and not prev_ready
-    sig_event = sig != prev_sig
-    time_event = now - last_time > 1800  # 30 phút
 
     # ===== MESSAGE =====
     msg = "TOP 3 T+4 PICKS\n\n"
@@ -158,13 +157,26 @@ def run():
         )
         msg += "👉 READY\n\n" if r["has_entry"] else "⏳ WAIT\n\n"
 
-    # ===== SEND =====
-    if ready_event or sig_event or time_event:
+    # ===== SEND LOGIC (ĐƠN GIẢN – KHÔNG MISS) =====
+    should_send = False
+
+    # lần đầu
+    if not sent_once:
+        should_send = True
+
+    # kèo thay đổi
+    elif sig != prev_sig:
+        should_send = True
+
+    # READY mới xuất hiện
+    elif has_ready and not prev_ready:
+        should_send = True
+
+    if should_send:
 
         if allow_send_time():
             send(msg)
-            print("📨 SEND")
-            last_time = now
+            print("📨 SENT")
         else:
             print("⏸ Before 09:30")
 
@@ -174,7 +186,7 @@ def run():
     save_state({
         "sig": sig,
         "ready": has_ready,
-        "time": last_time
+        "sent_once": True
     })
 
 
