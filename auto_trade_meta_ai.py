@@ -20,9 +20,15 @@ NAV = 100_000_000
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-    except:
-        print("❌ Telegram lỗi")
+        r = requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+
+        if r.status_code != 200:
+            print("❌ Telegram lỗi:", r.text)
+        else:
+            print("📨 SENT OK")
+
+    except Exception as e:
+        print("❌ Telegram exception:", e)
 
 
 # ===== TIME FILTER =====
@@ -34,12 +40,12 @@ def allow_send_time():
 # ===== STATE =====
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"sig": "", "ready": False, "sent_once": False}
+        return None
     try:
         with open(STATE_FILE, "r") as f:
             return json.load(f)
     except:
-        return {"sig": "", "ready": False, "sent_once": False}
+        return None
 
 
 def save_state(state):
@@ -135,11 +141,19 @@ def run():
 
     sig = build_signature(results)
 
+    # ===== LOAD STATE =====
     state = load_state()
 
-    prev_sig = state["sig"]
-    prev_ready = state["ready"]
-    sent_once = state.get("sent_once", False)
+    # ===== SELF-HEAL =====
+    if state is None:
+        print("🔄 No state → first run")
+        prev_sig = ""
+        prev_ready = False
+        sent_once = False
+    else:
+        prev_sig = state.get("sig", "")
+        prev_ready = state.get("ready", False)
+        sent_once = state.get("sent_once", False)
 
     has_ready = any(r["has_entry"] for r in results)
 
@@ -157,32 +171,33 @@ def run():
         )
         msg += "👉 READY\n\n" if r["has_entry"] else "⏳ WAIT\n\n"
 
-    # ===== SEND LOGIC (ĐƠN GIẢN – KHÔNG MISS) =====
+    # ===== SEND LOGIC =====
     should_send = False
 
-    # lần đầu
     if not sent_once:
         should_send = True
+        print("🟢 First run → SEND")
 
-    # kèo thay đổi
     elif sig != prev_sig:
         should_send = True
+        print("🟡 New signal → SEND")
 
-    # READY mới xuất hiện
     elif has_ready and not prev_ready:
         should_send = True
+        print("🔵 READY event → SEND")
 
+    else:
+        print("⏸ No change")
+
+    # ===== EXECUTE =====
     if should_send:
 
         if allow_send_time():
             send(msg)
-            print("📨 SENT")
         else:
-            print("⏸ Before 09:30")
+            print("⏸ Before 09:30 → blocked")
 
-    else:
-        print("⏸ Skip")
-
+    # ===== SAVE STATE =====
     save_state({
         "sig": sig,
         "ready": has_ready,
