@@ -21,13 +21,13 @@ if os.path.exists(FILE):
         st.dataframe(df, use_container_width=True)
 
 
-# ===== COLOR =====
+# ===== COLOR FUNCTION =====
 def color_status(val):
     if val == "WIN":
         return "background-color: #d4edda"
-    if val == "LOSS":
+    elif val == "LOSS":
         return "background-color: #f8d7da"
-    if val == "HOLD":
+    elif val == "HOLD":
         return "background-color: #fff3cd"
     return ""
 
@@ -46,7 +46,12 @@ if os.path.exists(HISTORY_FILE):
 
         df["winrate"] = (df["winrate"]*100).round(1).astype(str) + "%"
 
-        st.dataframe(
-            df.style.applymap(color_status, subset=["status"]),
-            use_container_width=True
-        )
+        styled_df = df.style.map(color_status, subset=["status"])
+
+        st.dataframe(styled_df, use_container_width=True)
+
+    else:
+        st.warning("No history data")
+
+else:
+    st.warning("No history file")
