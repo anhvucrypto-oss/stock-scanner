@@ -5,6 +5,7 @@ import os
 import json
 import hashlib
 import time
+import urllib.parse
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -17,17 +18,15 @@ CHAT_ID = "1329522024"
 NAV = 100_000_000
 
 
-# ===== TELEGRAM =====
+# ===== TELEGRAM (FIX SSL + RETRY) =====
 def send(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+
+    text = urllib.parse.quote(msg)
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage?chat_id={CHAT_ID}&text={text}"
 
     for i in range(5):
         try:
-            r = requests.post(
-                url,
-                data={"chat_id": CHAT_ID, "text": msg},
-                timeout=10
-            )
+            r = requests.get(url, timeout=10)
 
             if r.status_code == 200:
                 print("📨 SENT OK")
@@ -171,7 +170,7 @@ def run():
     state = load_state()
     prev_sig = state.get("sig", "")
 
-    # ===== SEND LOGIC =====
+    # ===== SEND =====
     if sig != prev_sig:
         if allow_send_time():
             send(msg)
