@@ -141,20 +141,32 @@ def run():
     prev_sig = state.get("sig", "")
 
     # ===== SEND =====
-    if sig != prev_sig:
-        if allow_send_time():
-            send(msg)
-            print("📨 SENT")
-        else:
-            print("⏸ Before 09:30")
-    else:
-        print("⏸ Duplicate → skip")
+    def send(msg):
+    import time
 
-    # ===== SAVE STATE =====
-    with open(STATE_FILE, "w") as f:
-        json.dump({"sig": sig}, f)
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
+    for i in range(5):  # retry 5 lần
+        try:
+            r = requests.post(
+                url,
+                data={"chat_id": CHAT_ID, "text": msg},
+                timeout=10
+            )
 
+            if r.status_code == 200:
+                print("📨 SENT OK")
+                return True
+            else:
+                print("⚠️ Telegram error:", r.text)
+
+        except Exception as e:
+            print(f"❌ Retry {i+1}:", e)
+
+        time.sleep(2)
+
+    print("🚨 SEND FAILED (network issue)")
+    return False
 # ===== RUN =====
 if __name__ == "__main__":
     run()
