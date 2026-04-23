@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import json
 import hashlib
+import time
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,12 +19,29 @@ NAV = 100_000_000
 
 # ===== TELEGRAM =====
 def send(msg):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        r = requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-        print("📡 TELEGRAM:", r.text)
-    except Exception as e:
-        print("❌ Telegram error:", e)
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+
+    for i in range(5):
+        try:
+            r = requests.post(
+                url,
+                data={"chat_id": CHAT_ID, "text": msg},
+                timeout=10
+            )
+
+            if r.status_code == 200:
+                print("📨 SENT OK")
+                return True
+            else:
+                print("⚠️ Telegram error:", r.text)
+
+        except Exception as e:
+            print(f"❌ Retry {i+1}:", e)
+
+        time.sleep(2)
+
+    print("🚨 SEND FAILED")
+    return False
 
 
 # ===== TIME FILTER =====
@@ -63,7 +81,7 @@ def check_entry(df):
     return bool(df["close"].iloc[-1] > ma20.iloc[-1])
 
 
-# ===== SIGNATURE (CHỐNG TRÙNG) =====
+# ===== SIGNATURE =====
 def build_signature(results):
     clean = []
     for r in results:
@@ -73,9 +91,27 @@ def build_signature(results):
             "sl": round(r["sl"], 2),
             "tp": round(r["tp"], 2)
         })
+
     clean = sorted(clean, key=lambda x: x["symbol"])
     data = json.dumps(clean, sort_keys=True)
     return hashlib.md5(data.encode()).hexdigest()
+
+
+# ===== STATE =====
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {"sig": ""}
+
+    try:
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {"sig": ""}
+
+
+def save_state(sig):
+    with open(STATE_FILE, "w") as f:
+        json.dump({"sig": sig}, f)
 
 
 # ===== MAIN =====
@@ -111,10 +147,10 @@ def run():
             "has_entry": has_entry
         })
 
-    # READY lên trên
+    # ===== READY lên trên =====
     results = sorted(results, key=lambda x: x["has_entry"], reverse=True)
 
-    # ===== BUILD MESSAGE (GIỮ NGUYÊN FORMAT) =====
+    # ===== BUILD MESSAGE =====
     msg = "TOP 3 T+4 PICKS\n\n"
 
     for r in results:
@@ -126,47 +162,28 @@ def run():
             f"Winrate: {round(r['winrate']*100,1)}%\n"
             f"Vốn: {r['capital']:,}\n"
         )
+
         msg += "👉 READY\n\n" if r["has_entry"] else "⏳ WAIT\n\n"
 
     # ===== SIGNATURE =====
     sig = build_signature(results)
 
-    # ===== LOAD STATE =====
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            state = json.load(f)
-    else:
-        state = {"sig": ""}
-
+    state = load_state()
     prev_sig = state.get("sig", "")
 
-    # ===== SEND =====
-    def send(msg):
-    import time
+    # ===== SEND LOGIC =====
+    if sig != prev_sig:
+        if allow_send_time():
+            send(msg)
+        else:
+            print("⏸ Before 09:30")
+    else:
+        print("⏸ Duplicate → skip")
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    # ===== SAVE STATE =====
+    save_state(sig)
 
-    for i in range(5):  # retry 5 lần
-        try:
-            r = requests.post(
-                url,
-                data={"chat_id": CHAT_ID, "text": msg},
-                timeout=10
-            )
 
-            if r.status_code == 200:
-                print("📨 SENT OK")
-                return True
-            else:
-                print("⚠️ Telegram error:", r.text)
-
-        except Exception as e:
-            print(f"❌ Retry {i+1}:", e)
-
-        time.sleep(2)
-
-    print("🚨 SEND FAILED (network issue)")
-    return False
 # ===== RUN =====
 if __name__ == "__main__":
     run()
